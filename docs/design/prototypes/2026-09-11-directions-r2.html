@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>엔빵 — 디자인 방향 2차 3안</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;900&family=Noto+Sans+KR:wght@400;500;700;900&family=Gowun+Batang:wght@400;700&family=Archivo:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #f3f4f6; color: #111; font-family: 'Noto Sans KR', sans-serif; padding: 48px 20px 96px; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 25px; }
+  .sub { margin-top: 8px; color: #555; font-size: 14px; line-height: 1.8; }
+  section { margin-top: 64px; }
+  .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  .no { font-size: 12px; letter-spacing: 0.15em; color: #888; font-family: 'Archivo', sans-serif; }
+  .head h2 { font-size: 20px; }
+  .desc { color: #555; font-size: 13.5px; line-height: 1.8; margin-bottom: 18px; }
+  .board { display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
+  @media (max-width: 720px) { .board { grid-template-columns: 1fr; } }
+  .chips { display: flex; gap: 8px; margin-top: 12px; }
+  .chip { flex: 1; height: 44px; border-radius: 6px; display: flex; align-items: flex-end; padding: 4px 6px; font-size: 10px; font-family: 'Archivo', sans-serif; color: #fff; }
+  .spec { font-size: 12px; color: #666; line-height: 1.9; margin-top: 10px; }
+
+  /* ============ D. 매거진 ============ */
+  .mock-d {
+    background: #faf8f4; padding: 26px 24px; color: #1c1a17;
+    font-family: 'Noto Sans KR', sans-serif;
+    border-top: 3px solid #1c1a17;
+  }
+  .mock-d .kicker { font-size: 11px; letter-spacing: 0.28em; color: #8a8377; }
+  .mock-d .grp { font-family: 'Noto Serif KR', serif; font-weight: 900; font-size: 24px; margin-top: 6px; letter-spacing: -0.01em; }
+  .mock-d .balwrap { margin-top: 18px; display: flex; align-items: baseline; gap: 10px; }
+  .mock-d .bal { font-family: 'Noto Serif KR', serif; font-weight: 600; font-size: 40px; letter-spacing: -0.02em; }
+  .mock-d .bal-note { font-size: 12px; color: #8a8377; }
+  .mock-d .rows { margin-top: 20px; }
+  .mock-d .row { display: flex; justify-content: space-between; align-items: baseline; padding: 11px 0; border-bottom: 1px solid #e7e2d8; font-size: 13.5px; }
+  .mock-d .row:first-child { border-top: 1px solid #1c1a17; }
+  .mock-d .row .amt { font-variant-numeric: tabular-nums; font-weight: 500; }
+  .mock-d .row .plus { border-bottom: 2px solid #c8b24a; }
+  .mock-d .btn { margin-top: 20px; display: inline-block; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; border-bottom: 2px solid #1c1a17; padding-bottom: 2px; }
+
+  /* ============ E. 스위스 그리드 ============ */
+  .mock-e {
+    background: #ffffff; padding: 0; color: #0a0a0a;
+    font-family: 'Noto Sans KR', sans-serif;
+    border: 2px solid #0a0a0a;
+  }
+  .mock-e .bar { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 2px solid #0a0a0a; }
+  .mock-e .bar .grp { font-weight: 900; font-size: 14px; letter-spacing: -0.01em; }
+  .mock-e .bar .tag { font-family: 'Archivo', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; background: #ff4d00; color: #fff; padding: 3px 8px; }
+  .mock-e .balblock { padding: 18px 14px; border-bottom: 2px solid #0a0a0a; }
+  .mock-e .bal-label { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: #666; }
+  .mock-e .bal { font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 44px; letter-spacing: -0.03em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .mock-e table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .mock-e td { padding: 10px 14px; border-bottom: 1px solid #d8d8d8; }
+  .mock-e td.amt { text-align: right; font-family: 'Archivo', sans-serif; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .mock-e td.amt.minus { color: #0a0a0a; }
+  .mock-e td.amt.plus { color: #ff4d00; }
+  .mock-e .btn { display: block; text-align: center; background: #0a0a0a; color: #fff; font-weight: 900; font-size: 13.5px; letter-spacing: 0.08em; padding: 13px; }
+
+  /* ============ F. 서첩(전통) ============ */
+  .mock-f {
+    background: #f5efe3;
+    background-image: radial-gradient(rgba(120, 95, 60, 0.05) 1px, transparent 1.2px);
+    background-size: 5px 5px;
+    padding: 26px 24px; color: #26211a;
+    font-family: 'Gowun Batang', serif;
+    border: 1px solid #d9cdb4;
+    position: relative;
+  }
+  .mock-f .grp { font-size: 19px; font-weight: 700; letter-spacing: 0.04em; }
+  .mock-f .seal {
+    position: absolute; top: 20px; right: 22px;
+    width: 44px; height: 44px; border: 2.5px solid #b3402e; border-radius: 8px;
+    color: #b3402e; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 700; letter-spacing: 0.1em; transform: rotate(-4deg);
+    line-height: 1.2; text-align: center;
+  }
+  .mock-f .bal-label { margin-top: 16px; font-size: 12px; color: #7c6f57; letter-spacing: 0.3em; }
+  .mock-f .bal { font-size: 36px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .mock-f .rows { margin-top: 18px; border-top: 1px solid #26211a; }
+  .mock-f .row { display: flex; justify-content: space-between; padding: 11px 2px; border-bottom: 1px dotted #c4b593; font-size: 14px; }
+  .mock-f .row .amt { font-variant-numeric: tabular-nums; }
+  .mock-f .row .plus { color: #26211a; }
+  .mock-f .row .minus { color: #b3402e; }
+  .mock-f .btn { margin-top: 18px; display: inline-block; border: 1.5px solid #26211a; padding: 9px 20px; font-size: 13.5px; letter-spacing: 0.15em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>엔빵 — 디자인 방향 2차</h1>
+  <p class="sub">1차 기각 반영: 레트로 모노(클로드코드 결)·핀테크 클리셰 배제. 이번엔 서로 다른 세 가족 — 매거진, 스위스 정보디자인, 한국 전통.</p>
+
+  <!-- D -->
+  <section>
+    <div class="head"><span class="no">D</span><h2>매거진 — 돈을 다루는 잡지</h2></div>
+    <p class="desc">매거진 B·킨포크의 문법: 큰 명조 헤드라인, 넉넉한 여백, 가는 괘선, 포인트는 머스터드 밑줄 하나. 돈 앱처럼 안 생긴 돈 앱 — "우리 모임의 재정 리포트를 읽는다"는 감각. 포트폴리오(얇은 책)와 형제 결이라 개인 브랜드 일관성도 생깁니다.</p>
+    <div class="board">
+      <div class="mock-d">
+        <div class="kicker">SHUTTLECOCK CLUB — JANUARY</div>
+        <div class="grp">배드민턴 클럽 셔틀콕</div>
+        <div class="balwrap"><span class="bal">342,000</span><span class="bal-note">원 · 1월 25일 기준</span></div>
+        <div class="rows">
+          <div class="row"><span>1월 회비 <span style="color:#8a8377">— 18명 납부</span></span><span class="amt plus">+360,000</span></div>
+          <div class="row"><span>코트 대관 (1월 2주)</span><span class="amt">−96,000</span></div>
+          <div class="row"><span>셔틀콕 2박스</span><span class="amt">−52,000</span></div>
+        </div>
+        <span class="btn">지출 기록 →</span>
+      </div>
+      <div>
+        <div class="chips">
+          <span class="chip" style="background:#1c1a17">#1c1a17</span>
+          <span class="chip" style="background:#8a8377">#8a8377</span>
+          <span class="chip" style="background:#c8b24a">#c8b24a</span>
+          <span class="chip" style="background:#faf8f4;color:#333;border:1px solid #ddd">#faf8f4</span>
+        </div>
+        <p class="spec">Noto Serif KR(제목·금액) + Noto Sans KR(본문)<br>괘선·밑줄 디테일, 라운드 없음<br>포인트: 머스터드 밑줄 단 하나</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- E -->
+  <section>
+    <div class="head"><span class="no">E</span><h2>스위스 그리드 — 시간표의 정확함</h2></div>
+    <p class="desc">국제주의 타이포그래피: 두꺼운 괘선 그리드, 그로테스크 볼드 숫자, 원색 포인트 하나(오렌지). 철도 시간표·브라운 계산기의 결 — "돈은 정보고, 정보는 정확하게". 유행을 안 타는 클래식이라 3년 뒤에 봐도 안 낡습니다.</p>
+    <div class="board">
+      <div class="mock-e">
+        <div class="bar"><span class="grp">배드민턴 클럽 셔틀콕</span><span class="tag">JAN 18/20</span></div>
+        <div class="balblock">
+          <div class="bal-label">잔액</div>
+          <div class="bal">342,000</div>
+        </div>
+        <table>
+          <tr><td>1월 회비</td><td class="amt plus">+360,000</td></tr>
+          <tr><td>코트 대관</td><td class="amt minus">−96,000</td></tr>
+          <tr><td>셔틀콕 2박스</td><td class="amt minus">−52,000</td></tr>
+        </table>
+        <span class="btn">지출 기록</span>
+      </div>
+      <div>
+        <div class="chips">
+          <span class="chip" style="background:#0a0a0a">#0a0a0a</span>
+          <span class="chip" style="background:#ff4d00">#ff4d00</span>
+          <span class="chip" style="background:#666">#666666</span>
+          <span class="chip" style="background:#ffffff;color:#333;border:1px solid #ddd">#ffffff</span>
+        </div>
+        <p class="spec">Archivo(숫자·라벨) + Noto Sans KR 900(제목)<br>2px 블랙 괘선 그리드, 라운드 0<br>포인트: 인터내셔널 오렌지 단 하나</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- F -->
+  <section>
+    <div class="head"><span class="no">F</span><h2>서첩 — 계모임의 헤리티지</h2></div>
+    <p class="desc">한지 결 + 붓 세리프 + 인주 도장. 회비 모임의 원형인 '계(契)'의 감각을 미니멀하게 — 도장은 납부 확인 UI(찍히면 납부 완료)로 그대로 기능화할 수 있는 방향. 한국적인데 기념품샵으로 안 빠지게 절제가 관건.</p>
+    <div class="board">
+      <div class="mock-f">
+        <div class="seal">납부<br>완료</div>
+        <div class="grp">배드민턴 클럽 셔틀콕</div>
+        <div class="bal-label">현재 잔액</div>
+        <div class="bal">342,000원</div>
+        <div class="rows">
+          <div class="row"><span>1월 회비 — 열여덟 명</span><span class="amt plus">+360,000</span></div>
+          <div class="row"><span>코트 대관</span><span class="amt minus">−96,000</span></div>
+          <div class="row"><span>셔틀콕 두 박스</span><span class="amt minus">−52,000</span></div>
+        </div>
+        <span class="btn">지출 기록</span>
+      </div>
+      <div>
+        <div class="chips">
+          <span class="chip" style="background:#26211a">#26211a</span>
+          <span class="chip" style="background:#b3402e">#b3402e</span>
+          <span class="chip" style="background:#7c6f57">#7c6f57</span>
+          <span class="chip" style="background:#f5efe3;color:#333;border:1px solid #ddd">#f5efe3</span>
+        </div>
+        <p class="spec">고운바탕(전체) — 포트폴리오와 동일 서체<br>한지 질감 도트, 점선 괘, 인주 레드<br>도장 = 납부 체크 인터랙션으로 기능화</p>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>
