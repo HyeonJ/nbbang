@@ -33,4 +33,11 @@ Next.js 15 (App Router, 서버 액션) · React 19 · TypeScript · Drizzle · N
 
 ## 개발
 
-(스캐폴드 후 작성)
+```bash
+npm install        # 의존성 설치
+npm run dev        # 개발 서버 (http://localhost:3000)
+npm run lint       # ESLint
+npx tsc --noEmit   # 타입 체크
+npm test           # Vitest 단위 테스트
+npm run build      # 프로덕션 빌드
+```
