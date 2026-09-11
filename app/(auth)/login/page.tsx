@@ -14,7 +14,11 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  const next = searchParams.get('next') ?? '/groups';
+  const rawNext = searchParams.get('next');
+  const next =
+    rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') && !rawNext.includes('\\')
+      ? rawNext
+      : '/groups';
   const isSignup = mode === 'signup';
 
   async function handleSubmit(e: React.FormEvent) {
