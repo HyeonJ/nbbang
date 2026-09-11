@@ -1,4 +1,7 @@
 import { pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { user } from './auth-schema';
+
+export * from './auth-schema';
 
 export const groups = pgTable('groups', {
   id: text('id').primaryKey(), // crypto.randomUUID()
@@ -10,7 +13,7 @@ export const groups = pgTable('groups', {
 
 export const memberships = pgTable('memberships', {
   id: text('id').primaryKey(),
-  userId: text('user_id').notNull(), // Better Auth user.id 참조 (FK는 auth 스키마 생성 후 Task 3에서 추가)
+  userId: text('user_id').notNull().references(() => user.id), // Better Auth user.id
   groupId: text('group_id').notNull().references(() => groups.id),
   role: text('role', { enum: ['owner', 'member'] }).notNull(),
   displayName: text('display_name').notNull(),
