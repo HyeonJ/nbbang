@@ -16,8 +16,10 @@
     "better-auth": "^1.7.4",
     "drizzle-orm": "^0.45.2",
     "next": "15.5.25",
+    "next-safe-action": "^8.7.3",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "zod": "^4.6.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
