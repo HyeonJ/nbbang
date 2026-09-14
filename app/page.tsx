@@ -1,103 +1,79 @@
-import Image from "next/image";
+import Link from 'next/link';
+
+const STEPS = [
+  {
+    no: '01',
+    title: '걷는다',
+    body: '월 회차를 만들고 납부를 체크한다. 미납자 명단은 카톡에 붙여넣을 수 있는 텍스트로 나온다.',
+  },
+  {
+    no: '02',
+    title: '쓴다',
+    body: '지출을 기록한다. 잘못 적었으면 지우지 않고 역분개로 정정한다 — 장부는 고쳐 쓰지 않는다.',
+  },
+  {
+    no: '03',
+    title: '나눈다',
+    body: '회식비를 엔빵하면 누가 누구에게 얼마를 보낼지 최소 송금 횟수로 계산해준다.',
+  },
+];
 
 export default function Home() {
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <main className="mx-auto min-h-dvh max-w-3xl px-5 pb-20">
+      <header className="flex items-center justify-between border-b-2 border-ink py-4">
+        <span className="font-display text-lg font-bold tracking-tight">엔빵</span>
+        <span className="font-display text-[11px] font-medium tracking-[0.18em] text-muted uppercase">
+          Group Dues Ledger
+        </span>
+      </header>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+      <section className="border-b-2 border-ink py-14">
+        <h1 className="text-3xl leading-[1.35] font-black tracking-tight sm:text-4xl sm:leading-[1.3]">
+          모임 회비,
+          <br />
+          <span className="border-b-4 border-accent">엑셀 스크린샷</span>은 이제 그만.
+        </h1>
+        <p className="mt-6 max-w-xl leading-[1.85] text-muted">
+          동호회·스터디 총무를 위한 회비 장부입니다. 걷고, 쓰고, 나누고, 링크 하나로 투명하게 공개하세요.
+          멤버는 가입하지 않아도 장부를 볼 수 있습니다.
+        </p>
+        <Link
+          href="/groups"
+          className="mt-9 inline-block bg-ink px-7 py-3.5 text-[15px] font-bold tracking-[0.06em] text-paper"
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
+          모임 만들기 →
+        </Link>
+      </section>
+
+      <section className="grid sm:grid-cols-3">
+        {STEPS.map((s) => (
+          <article key={s.no} className="border-b border-hairline py-7 sm:border-b-0 sm:pr-6 sm:last:pr-0">
+            <span className="font-display text-[11px] font-bold tracking-[0.18em] text-accent">{s.no}</span>
+            <h2 className="mt-2 text-lg font-bold">{s.title}</h2>
+            <p className="mt-2 text-[14px] leading-[1.8] text-muted">{s.body}</p>
+          </article>
+        ))}
+      </section>
+
+      <section className="mt-4 border-t-2 border-ink pt-7">
+        <p className="text-[14px] leading-[1.85] text-muted">
+          모든 금액 변동은 지울 수 없는 기록으로 남습니다. 잔액은 저장된 숫자가 아니라 기록을 합산한
+          결과라서, 장부와 잔액이 어긋날 수가 없습니다.
+        </p>
+      </section>
+
+      <footer className="mt-14 flex items-center justify-between border-t border-hairline pt-5 text-[12px] text-muted">
+        <span className="font-display tracking-[0.1em]">NBBANG</span>
         <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+          href="https://github.com/HyeonJ/nbbang"
           target="_blank"
-          rel="noopener noreferrer"
+          rel="noopener"
+          className="underline underline-offset-4 hover:text-accent"
         >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
+          GitHub
         </a>
       </footer>
-    </div>
+    </main>
   );
 }
