@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { groups, memberships } from '@/lib/db/schema';
+import { formatDateKst } from '@/lib/format';
 import NewGroupForm from './new-group-form';
 
 export default async function GroupsPage() {
@@ -39,7 +40,7 @@ export default async function GroupsPage() {
               >
                 <span className="font-medium text-gray-900">{g.name}</span>
                 <span className="text-sm text-gray-500">
-                  {g.role === 'owner' ? '총무' : '멤버'} · {g.joinedAt.toISOString().slice(0, 10)} 합류
+                  {g.role === 'owner' ? '총무' : '멤버'} · {formatDateKst(g.joinedAt)} 합류
                 </span>
               </Link>
             </li>

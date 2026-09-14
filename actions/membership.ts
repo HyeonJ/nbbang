@@ -17,10 +17,20 @@ export const joinByInvite = authActionClient
       where: and(eq(memberships.groupId, group.id), eq(memberships.userId, ctx.userId)),
     });
     if (dup) return { groupId: group.id, already: true };
-    await db.insert(memberships).values({
-      id: crypto.randomUUID(), userId: ctx.userId, groupId: group.id,
-      role: 'member', displayName: parsedInput.displayName,
-    });
+    try {
+      await db.insert(memberships).values({
+        id: crypto.randomUUID(), userId: ctx.userId, groupId: group.id,
+        role: 'member', displayName: parsedInput.displayName,
+      });
+    } catch (e) {
+      // 동시 합류 레이스: 유니크 인덱스(memberships_user_group)가 최종 방어선.
+      // 진 쪽도 "이미 멤버"와 같은 결과로 본다.
+      if ((e as { code?: string }).code === '23505') {
+        revalidatePath('/groups');
+        return { groupId: group.id, already: true };
+      }
+      throw e;
+    }
     revalidatePath('/groups');
     return { groupId: group.id, already: false };
   });

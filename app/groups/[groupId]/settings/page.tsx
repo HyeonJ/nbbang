@@ -2,6 +2,7 @@ import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { getGroupForMember, getGroupMembers } from '@/lib/db/queries';
+import { formatDateKst } from '@/lib/format';
 import InviteLinkPanel from './invite-link-panel';
 
 export default async function GroupSettingsPage({ params }: { params: Promise<{ groupId: string }> }) {
@@ -44,7 +45,7 @@ export default async function GroupSettingsPage({ params }: { params: Promise<{ 
               <tr key={m.id} className="border-b border-gray-100 last:border-b-0" data-testid="member-row">
                 <td className="py-2 text-gray-900">{m.displayName}</td>
                 <td className="py-2 text-gray-700">{m.role === 'owner' ? '총무' : '멤버'}</td>
-                <td className="py-2 text-gray-500">{m.joinedAt.toISOString().slice(0, 10)}</td>
+                <td className="py-2 text-gray-500">{formatDateKst(m.joinedAt)}</td>
               </tr>
             ))}
           </tbody>
