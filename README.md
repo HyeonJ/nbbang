@@ -2,7 +2,8 @@
 
 동호회·스터디 총무를 위한 회비 장부 — 걷고, 쓰고, 나누고, 투명하게 공개한다.
 
-> **상태**: 설계 단계 (2026-09-11 설계 승인 → 구현 계획 작성 중)
+> **상태**: Plan 01(기반) 완료·배포 — https://nbbang-iota.vercel.app
+> 가입/로그인, 모임 개설, 초대 링크 합류, 대시보드·설정까지 동작. 다음은 Plan 02(원장·회비·지출).
 
 ## 왜
 
@@ -24,6 +25,16 @@
 ## 스택
 
 Next.js 15 (App Router, 서버 액션) · React 19 · TypeScript · Drizzle · Neon (Postgres) · Better Auth · Tailwind v4 · Vercel
+
+### 환경 (Neon 브랜치 3개)
+
+| 브랜치 | 용도 | 주입 위치 |
+|---|---|---|
+| `production` | 배포 | Vercel 환경변수 |
+| `dev` | 로컬 개발 | `.env.local` |
+| `test` | E2E (로컬·CI) | `.env.test` / GitHub `TEST_DATABASE_URL` |
+
+E2E는 대상 DB를 TRUNCATE하므로 `test` 브랜치에만 `e2e_sentinel` 마커 테이블을 만든다 (`.env.example` 참고).
 
 ## 원칙
 
