@@ -1,28 +1,21 @@
 import { test, expect } from '@playwright/test';
+import { createGroup, exactAmount, signUp, testEmail } from './helpers';
 
 test('가입→모임 생성→초대 합류→설정 권한', async ({ browser }) => {
   test.setTimeout(120_000);
-  const ts = Date.now();
 
   // 1) 총무 가입
   const ownerContext = await browser.newContext();
   const op = await ownerContext.newPage();
   await op.goto('/login');
-  await op.getByTestId('auth-toggle').click();
-  await op.getByTestId('auth-name').fill('민지');
-  await op.getByTestId('auth-email').fill(`owner-${ts}@test.local`);
-  await op.getByTestId('auth-password').fill('password123!');
-  await op.getByTestId('auth-submit').click();
+  await signUp(op, { name: '민지', email: testEmail('foundation', 'owner') });
   await expect(op).toHaveURL(/\/groups$/);
 
   // 2) 모임 생성 → 대시보드
-  await op.getByTestId('group-name').fill('테스트모임');
-  await op.getByTestId('group-display-name').fill('민지');
-  await op.getByTestId('group-create').click();
-  await expect(op).toHaveURL(/\/groups\/[^/]+$/);
+  await createGroup(op, '테스트모임', '민지');
   await expect(op.getByTestId('group-title')).toHaveText('테스트모임');
   // 숫자는 정확히 0이어야 한다(뒤따르는 단위 '원'만 허용) — toContainText('0')은 '10,000'도 통과시킨다.
-  await expect(op.getByTestId('group-balance')).toHaveText(/^0\D*$/);
+  await expect(op.getByTestId('group-balance')).toHaveText(exactAmount('0'));
 
   // 3) 설정 — 초대 링크 추출, 멤버 1명(총무)
   await op.getByTestId('settings-link').click();
@@ -38,11 +31,7 @@ test('가입→모임 생성→초대 합류→설정 권한', async ({ browser 
   const mp = await memberContext.newPage();
   await mp.goto(invite);
   await mp.getByTestId('join-login-link').click();
-  await mp.getByTestId('auth-toggle').click();
-  await mp.getByTestId('auth-name').fill('철수');
-  await mp.getByTestId('auth-email').fill(`member-${ts}@test.local`);
-  await mp.getByTestId('auth-password').fill('password123!');
-  await mp.getByTestId('auth-submit').click();
+  await signUp(mp, { name: '철수', email: testEmail('foundation', 'member') });
   await expect(mp).toHaveURL(/\/invite\/.+/);
   await mp.getByTestId('join-display-name').fill('철수');
   await mp.getByTestId('join-submit').click();
