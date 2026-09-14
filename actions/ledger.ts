@@ -1,8 +1,8 @@
 'use server';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
-import { revalidatePath } from 'next/cache';
 import { groupActionClient, assertOwner, ActionError } from './clients';
+import { revalidateLedger } from './revalidate';
 import { db } from '@/lib/db';
 import { isUniqueViolation } from '@/lib/db/errors';
 import { ledgerEntries } from '@/lib/db/schema';
@@ -12,16 +12,6 @@ import {
   signedAmount,
   LedgerRuleError,
 } from '@/lib/domain/ledger';
-
-/**
- * 금액이 하나라도 움직이면 그 돈을 보여주는 화면이 전부 함께 낡는다 — 한 번에 무효화한다.
- * 회비 화면도 포함한다: 납부는 원장 엔트리로 잔액을 움직이고(Task 9), 회차 목록의 수납액도 같은 돈이다.
- */
-function revalidateLedger(groupId: string) {
-  revalidatePath(`/groups/${groupId}`);
-  revalidatePath(`/groups/${groupId}/expenses`);
-  revalidatePath(`/groups/${groupId}/dues`);
-}
 
 export const createExpense = groupActionClient
   .inputSchema(

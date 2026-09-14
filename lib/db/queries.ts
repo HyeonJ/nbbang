@@ -115,6 +115,20 @@ export async function getRoundsWithCounts(groupId: string) {
     .orderBy(desc(duesRounds.period));
 }
 
+/**
+ * 회차의 납부 멤버십 id 목록 — 회차 화면의 3수치·미납자 판정이 모두 이 집합에서 나온다.
+ *
+ * roundId는 호출 전에 모임으로 스코프해 확인해야 한다(getRound) — dues_payments에는
+ * group_id가 없어 이 쿼리만으로는 모임 경계를 지을 수 없다.
+ */
+export async function getRoundPaidMembershipIds(roundId: string): Promise<string[]> {
+  const rows = await db
+    .select({ membershipId: duesPayments.membershipId })
+    .from(duesPayments)
+    .where(eq(duesPayments.roundId, roundId));
+  return rows.map((r) => r.membershipId);
+}
+
 /** 모임으로 스코프한 회차 단건 — 남의 모임 roundId는 null로 떨어진다(존재 여부도 새지 않는다). */
 export async function getRound(groupId: string, roundId: string) {
   const rows = await db

@@ -12,10 +12,21 @@
   --color-muted: #666666;
   --color-paper: #ffffff;
   --color-hairline: #d8d8d8;
+  /* 복붙용 문구 블록의 바탕 — "여기부터 복사하면 된다"는 경계만 긋는 아주 옅은 회색(시안 Q2-B). */
+  --color-wash: #f4f5f6;
 
   --font-sans: var(--font-noto-kr), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   오렌지 두 값의 사용 규칙 (한 줄로: 글자는 accent-deep, 나머지는 accent)
+
+   18.66px 볼드(=14pt 볼드) 미만의 텍스트에는 반드시 `accent-deep`(#cc3c00, 4.98:1)을 쓴다.
+   `accent`(#ff4d00)는 흰 바탕에서 3.33:1로, WCAG AA의 소형 텍스트 기준 4.5:1을 넘지 못한다.
+   `accent`는 비텍스트 요소(괘선·탭 밑줄·포커스 링 — 3:1)와 24px+/18.66px+ 볼드 대형 텍스트에만.
+   두 값은 같은 인터내셔널 오렌지 계열이라 "포인트 컬러는 하나"라는 방향 문서 규칙은 지켜진다.
+   ───────────────────────────────────────────────────────────────────────────── */
 
 body {
   background: var(--color-paper);

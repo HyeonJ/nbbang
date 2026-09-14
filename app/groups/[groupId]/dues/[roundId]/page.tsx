@@ -1,14 +1,27 @@
 import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
+import type { ReactNode } from 'react';
 import { auth } from '@/lib/auth';
-import { getGroupForMember, getRound } from '@/lib/db/queries';
+import {
+  getGroupForMember,
+  getGroupMembers,
+  getRound,
+  getRoundPaidMembershipIds,
+} from '@/lib/db/queries';
+import { roundTotals, unpaidMembers } from '@/lib/domain/dues';
+import { formatAmount } from '@/lib/format';
 import { Amount } from '@/components/ui/amount';
+import { Cell, DataTable, Row } from '@/components/ui/data-table';
 import { GroupTabs } from '@/components/ui/group-tabs';
 import { PageHeader } from '@/components/ui/page-header';
+import PaymentToggle from './payment-toggle';
+import UnpaidNotice from './unpaid-notice';
 
-// 임시 자리표 — Plan 02 Task 9가 납부 체크 그리드(3수치·미납자·복사 문구)로 교체한다.
-// 목록의 회차 링크가 404로 끝나지 않게 하는 최소 페이지.
-export default async function RoundPlaceholderPage({
+/**
+ * 회차 화면 — 확정안 Q2 = B (direction.md 화면 결정).
+ * 이 화면의 목적은 명단 열람이 아니라 미납 처리다: 상단 3수치 → 미납자 먼저 → 완료자는 접기 → 하단 복사 문구.
+ */
+export default async function RoundPage({
   params,
 }: {
   params: Promise<{ groupId: string; roundId: string }>;
@@ -25,6 +38,31 @@ export default async function RoundPlaceholderPage({
   const round = await getRound(groupId, roundId);
   if (!round) notFound();
 
+  const isOwner = found.membership.role === 'owner';
+  const [members, paidIds] = await Promise.all([
+    getGroupMembers(groupId),
+    getRoundPaidMembershipIds(round.id),
+  ]);
+
+  const paidSet = new Set(paidIds);
+  const roster = members.map((m) => ({ membershipId: m.id, displayName: m.displayName }));
+  const unpaid = unpaidMembers(roster, paidIds);
+  const paid = roster.filter((m) => paidSet.has(m.membershipId));
+
+  const { expected, collected, outstanding } = roundTotals(
+    round.amountPerPerson,
+    members.length,
+    paidIds,
+  );
+  // 미납액이 음수면 데이터가 어긋난 것이다(납부 기록 > 현재 명단 — 납부 후 탈퇴 등).
+  // '−20,000원'은 총무에게 아무것도 알려주지 않고, 조용한 0은 불일치를 숨긴다 → 0을 쓰고 함께 알린다.
+  // roundTotals 자체는 clamp하지 않는다(도메인 주석 참조) — 표기 판단은 이 화면 몫이다.
+  const overpaid = outstanding < 0;
+
+  const notice = `${round.period} 회비(${formatAmount(round.amountPerPerson)}원) 미납: ${unpaid
+    .map((m) => m.displayName)
+    .join(', ')}`;
+
   return (
     <main className="mx-auto max-w-3xl px-5 pb-20">
       <PageHeader
@@ -35,12 +73,148 @@ export default async function RoundPlaceholderPage({
             <span className="font-display block text-[10px] font-bold tracking-[0.14em] text-muted uppercase">
               1인 금액
             </span>
-            <Amount value={round.amountPerPerson} size="lg" unit />
+            {/* 1인 금액은 회차의 조건이지 들어온 돈이 아니다 — 이 화면에서 오렌지는 '수납' 하나만 뜻한다. */}
+            <PlainAmount value={round.amountPerPerson} size="lg" />
           </span>
         }
       />
-      <GroupTabs groupId={groupId} isOwner={found.membership.role === 'owner'} />
-      <p className="mt-7 border-t-2 border-ink py-6 text-[14px] text-muted">납부 체크는 준비 중입니다.</p>
+      <GroupTabs groupId={groupId} isOwner={isOwner} />
+
+      <section className="mt-7 border-b-2 border-ink">
+        <div className="grid grid-cols-3">
+          <Stat label="예상" testId="round-total-expected">
+            <PlainAmount value={expected} />
+          </Stat>
+          <Stat label="수납" testId="round-total-collected" divider>
+            {/* 화면에서 오렌지가 갖는 의미는 하나 — '들어온 돈'. 예상·미납은 잉크로 둔다. */}
+            <Amount value={collected} size="md" unit />
+          </Stat>
+          <Stat label="미납" testId="round-total-outstanding" divider>
+            <PlainAmount value={overpaid ? 0 : outstanding} />
+          </Stat>
+        </div>
+        {overpaid ? (
+          <p role="alert" className="mb-5 border-l-2 border-ink pl-3 text-[13px] leading-[1.7]">
+            납부 인원이 현재 명단보다 많습니다 (기록 {paidIds.length}명 / 명단 {members.length}명)
+          </p>
+        ) : null}
+      </section>
+
+      <section className="pt-7">
+        {/* 할 일이 맨 위 — 인원이 늘어도 미납자를 찾아 스크롤하지 않는다. */}
+        <h2 className="font-display text-[11px] font-bold tracking-[0.14em] text-accent-deep uppercase">
+          미납 {unpaid.length}명
+        </h2>
+        <div className="mt-4">
+          <DataTable>
+            {unpaid.length === 0 ? (
+              <Row>
+                <Cell className="text-muted">전원 납부했습니다.</Cell>
+              </Row>
+            ) : (
+              unpaid.map((m) => (
+                <Row key={m.membershipId} testId="payment-row">
+                  <Cell>{m.displayName}</Cell>
+                  <Cell align="right">
+                    {isOwner ? (
+                      <PaymentToggle
+                        groupId={groupId}
+                        roundId={round.id}
+                        membershipId={m.membershipId}
+                        displayName={m.displayName}
+                        paid={false}
+                      />
+                    ) : (
+                      <span className="text-[12px] text-muted">미납</span>
+                    )}
+                  </Cell>
+                </Row>
+              ))
+            )}
+          </DataTable>
+        </div>
+      </section>
+
+      {/* 끝난 사람은 접어 둔다 — 확인은 언제든 가능하되 화면의 주인공은 아니다. */}
+      <details className="mt-7 border-t-2 border-ink" data-testid="paid-details">
+        <summary className="font-display cursor-pointer py-3.5 text-[11px] font-bold tracking-[0.14em] text-muted uppercase">
+          납부 완료 {paid.length}명
+        </summary>
+        <div className="pb-2">
+          <DataTable>
+            {paid.length === 0 ? (
+              <Row>
+                <Cell className="text-muted">아직 납부한 사람이 없습니다.</Cell>
+              </Row>
+            ) : (
+              paid.map((m) => (
+                <Row key={m.membershipId} testId="payment-row">
+                  <Cell>{m.displayName}</Cell>
+                  <Cell align="right">
+                    {isOwner ? (
+                      <PaymentToggle
+                        groupId={groupId}
+                        roundId={round.id}
+                        membershipId={m.membershipId}
+                        displayName={m.displayName}
+                        paid
+                      />
+                    ) : (
+                      <span className="text-[12px] text-muted">완료</span>
+                    )}
+                  </Cell>
+                </Row>
+              ))
+            )}
+          </DataTable>
+        </div>
+      </details>
+
+      {/* F6의 핵심 — 총무의 마지막 동선은 단톡방 독촉이다. 계좌번호 칸은 없다(데이터 모델에 없는 값). */}
+      {unpaid.length > 0 ? (
+        <section className="mt-7 border-2 border-ink p-4">
+          <h2 className="font-display text-[11px] font-bold tracking-[0.14em] text-muted uppercase">
+            미납 안내 문구
+          </h2>
+          <UnpaidNotice text={notice} />
+        </section>
+      ) : null}
     </main>
+  );
+}
+
+/** 3수치 한 칸 — 라벨 위, 숫자 아래. 두 번째·세 번째 칸만 1px 세로 괘선으로 나눈다(시안 Q2-B). */
+function Stat({
+  label,
+  testId,
+  divider = false,
+  children,
+}: {
+  label: string;
+  testId: string;
+  divider?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`py-5 ${divider ? 'border-l border-hairline pl-4' : ''}`}>
+      <div className="font-display text-[10px] font-bold tracking-[0.14em] text-muted uppercase">
+        {label}
+      </div>
+      <div className="mt-1.5" data-testid={testId}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** 잉크 금액 — Amount는 양수를 '들어온 돈'(오렌지)으로 칠하므로 1인 금액·예상·미납에는 쓰지 않는다. */
+function PlainAmount({ value, size = 'md' }: { value: number; size?: 'md' | 'lg' }) {
+  const cls = size === 'lg' ? 'text-2xl' : 'text-[15px]';
+  const unitCls = size === 'lg' ? 'text-[15px]' : 'text-[12px]';
+  return (
+    <span className={`num ${cls}`}>
+      {formatAmount(value)}
+      <span className={`${unitCls} font-medium`}>원</span>
+    </span>
   );
 }

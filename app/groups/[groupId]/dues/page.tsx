@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
@@ -8,6 +7,7 @@ import { Amount } from '@/components/ui/amount';
 import { Cell, DataTable, Row } from '@/components/ui/data-table';
 import { GroupTabs } from '@/components/ui/group-tabs';
 import { PageHeader } from '@/components/ui/page-header';
+import { TextLink } from '@/components/ui/text-link';
 import RoundForm from './round-form';
 
 export default async function DuesPage({ params }: { params: Promise<{ groupId: string }> }) {
@@ -50,13 +50,13 @@ export default async function DuesPage({ params }: { params: Promise<{ groupId: 
               rounds.map((r) => (
                 <Row key={r.id} testId="round-row">
                   <Cell>
-                    <Link
+                    <TextLink
                       href={`/groups/${groupId}/dues/${r.id}`}
                       data-testid="round-link"
-                      className="num font-bold hover:text-accent"
+                      className="num font-bold"
                     >
                       {r.period}
-                    </Link>
+                    </TextLink>
                   </Cell>
                   <Cell align="right" className="text-muted">
                     <span className="font-display mr-1.5 text-[10px] font-bold tracking-[0.14em] uppercase">
