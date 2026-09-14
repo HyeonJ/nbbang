@@ -21,8 +21,8 @@ test('가입→모임 생성→초대 합류→설정 권한', async ({ browser 
   await op.getByTestId('group-create').click();
   await expect(op).toHaveURL(/\/groups\/[^/]+$/);
   await expect(op.getByTestId('group-title')).toHaveText('테스트모임');
-  // 단위·구분자 표기까지 고정하지 않는다 — 이 스펙이 보는 것은 "새 모임의 잔액은 0"이다.
-  await expect(op.getByTestId('group-balance')).toContainText('0');
+  // 숫자는 정확히 0이어야 한다(뒤따르는 단위 '원'만 허용) — toContainText('0')은 '10,000'도 통과시킨다.
+  await expect(op.getByTestId('group-balance')).toHaveText(/^0\D*$/);
 
   // 3) 설정 — 초대 링크 추출, 멤버 1명(총무)
   await op.getByTestId('settings-link').click();

@@ -34,7 +34,7 @@ Next.js 15 (App Router, 서버 액션) · React 19 · TypeScript · Drizzle · N
 | `dev` | 로컬 개발 | `.env.local` |
 | `test` | E2E (로컬·CI) | `.env.test` / GitHub `TEST_DATABASE_URL` |
 
-E2E는 대상 DB를 TRUNCATE하므로 `test` 브랜치에만 `e2e_sentinel` 마커 테이블을 만든다 (`.env.example` 참고).
+E2E는 대상 DB를 TRUNCATE하므로 `test` 브랜치에만 `e2e_guard.sentinel` 마커 테이블을 만든다 (`.env.example` 참고).
 
 ## 원칙
 

@@ -31,10 +31,11 @@ export default async function globalSetup() {
 
   // 1차(주) 안전장치: 센티널 테이블. drizzle-kit push가 절대 만들지 않는 마커라서
   // URL을 어떤 표기로 적었든 "이 DB가 E2E 전용 브랜치인가"를 DB 자체에 물어본다.
-  const [{ ok }] = await sql`select to_regclass('public.e2e_sentinel') is not null as ok`;
+  // 센티널은 별도 스키마(e2e_guard)에 산다 — push는 public만 관리하므로 이 마커를 볼 수도, 지울 수도 없다.
+  const [{ ok }] = await sql`select to_regclass('e2e_guard.sentinel') is not null as ok`;
   if (!ok) {
     throw new Error(
-      'e2e_sentinel 테이블이 없습니다 — 이 DB는 E2E 전용 브랜치가 아닙니다. 테스트 브랜치에서 create table e2e_sentinel(); 를 한 번 실행하세요.',
+      'e2e_guard.sentinel 테이블이 없습니다 — 이 DB는 E2E 전용 브랜치가 아닙니다. 테스트 브랜치에서 create schema if not exists e2e_guard; create table if not exists e2e_guard.sentinel(); 를 한 번 실행하세요.',
     );
   }
 
@@ -47,16 +48,11 @@ export default async function globalSetup() {
     }
   }
 
-  // push 전에 센티널을 먼저 지운다. 센티널은 스키마에 없어 push의 '삭제 대상'인데,
-  // 같은 push에 '생성 대상' 테이블이 하나라도 있으면 drizzle-kit이
-  // "새 테이블인가 rename인가"를 대화형으로 묻고 비-TTY(CI)에서는 그대로 죽는다 — --force도 이 프롬프트는 건너뛰지 않는다.
-  // 삭제 대상을 0으로 만들어 프롬프트 자체를 없앤다. 가드 검사는 이미 위에서 끝났다.
-  await sql`drop table if exists e2e_sentinel`;
-
+  // push는 public 스키마만 관리한다 — e2e_guard.sentinel은 '삭제 대상'에 잡히지 않으므로
+  // drop/재생성 없이 그대로 살아남는다. (센티널이 public에 있던 시절에는 push가 매번 지웠고,
+  // 같은 push에 '생성 대상'이 하나라도 있으면 drizzle-kit이 "새 테이블인가 rename인가"를
+  // 대화형으로 물어 비-TTY(CI)에서 죽었다 — --force도 그 프롬프트는 건너뛰지 못한다.)
   execSync('npx drizzle-kit push --force', { stdio: 'inherit', env: process.env });
-
-  // 검사를 통과한 DB이므로 다시 세워 다음 실행을 보장한다.
-  await sql`create table if not exists e2e_sentinel()`;
 
   // ledger_entries는 groups FK로 CASCADE에 걸리지만, 지워지는 테이블은 이름으로 남겨둔다.
   await sql`TRUNCATE TABLE ledger_entries, memberships, groups, session, account, verification, "user" CASCADE`;
