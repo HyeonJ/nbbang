@@ -49,7 +49,7 @@ export default function Home() {
       <section className="grid sm:grid-cols-3">
         {STEPS.map((s) => (
           <article key={s.no} className="border-b border-hairline py-7 sm:border-b-0 sm:pr-6 sm:last:pr-0">
-            <span className="font-display text-[11px] font-bold tracking-[0.18em] text-accent">{s.no}</span>
+            <span className="font-display text-[11px] font-bold tracking-[0.18em] text-accent-deep">{s.no}</span>
             <h2 className="mt-2 text-lg font-bold">{s.title}</h2>
             <p className="mt-2 text-[14px] leading-[1.8] text-muted">{s.body}</p>
           </article>
@@ -69,7 +69,7 @@ export default function Home() {
           href="https://github.com/HyeonJ/nbbang"
           target="_blank"
           rel="noopener"
-          className="underline underline-offset-4 hover:text-accent"
+          className="underline underline-offset-4 hover:text-accent-deep"
         >
           GitHub
         </a>

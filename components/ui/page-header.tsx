@@ -18,7 +18,7 @@ export function PageHeader({ back, title, right, titleTestId = 'page-title' }: P
           <Link
             href={back}
             aria-label="뒤로"
-            className="font-display -mx-2 px-2 py-2 text-[13px] text-muted hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            className="font-display -mx-2 px-2 py-2 text-[13px] text-muted hover:text-accent-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
             ←
           </Link>
