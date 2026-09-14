@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>엔빵 — 화면 시안 (스위스 그리드)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0a0a0a;
+    --accent: #ff4d00;
+    --muted: #666666;
+    --paper: #ffffff;
+    --hairline: #d8d8d8;
+    --sans: 'Noto Sans KR', system-ui, sans-serif;
+    --display: 'Archivo', system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #eceef0; color: var(--ink); font-family: var(--sans); padding: 44px 18px 90px; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1.page { font-size: 24px; font-weight: 900; letter-spacing: -0.02em; }
+  .lead { margin-top: 8px; color: var(--muted); font-size: 14px; line-height: 1.8; }
+  .note { margin-top: 14px; border-left: 3px solid var(--accent); padding: 3px 0 3px 14px; font-size: 13.5px; line-height: 1.8; color: #333; }
+
+  section.screen { margin-top: 54px; }
+  .screen-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+  .screen-no { font-family: var(--display); font-size: 11px; font-weight: 700; letter-spacing: 0.18em; color: var(--muted); }
+  .screen-head h2 { font-size: 18px; font-weight: 900; }
+  .screen-desc { color: var(--muted); font-size: 13px; line-height: 1.8; margin-bottom: 16px; }
+
+  /* 모바일 프레임 */
+  .device { width: 390px; max-width: 100%; background: var(--paper); border: 1px solid #c9ccd0; }
+  .app { padding: 0 20px 28px; }
+
+  /* 공통 요소 */
+  .hdr { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid var(--ink); padding: 16px 0; }
+  .hdr .t { font-size: 19px; font-weight: 900; letter-spacing: -0.02em; display: flex; align-items: baseline; gap: 10px; }
+  .hdr .back { font-family: var(--display); font-size: 13px; color: var(--muted); }
+  .hdr .role { font-family: var(--display); font-size: 10px; font-weight: 700; letter-spacing: 0.14em; color: var(--paper); background: var(--ink); padding: 3px 7px; }
+  .num { font-family: var(--display); font-variant-numeric: tabular-nums; font-weight: 700; }
+  .label { font-family: var(--display); font-size: 10px; font-weight: 700; letter-spacing: 0.14em; color: var(--muted); text-transform: uppercase; }
+  .btn { display: inline-block; background: var(--ink); color: var(--paper); font-size: 14px; font-weight: 700; letter-spacing: 0.04em; padding: 11px 20px; }
+  .btn.out { background: transparent; color: var(--ink); border: 2px solid var(--ink); padding: 9px 18px; }
+  .btn.sm { font-size: 12px; padding: 7px 12px; }
+  table { width: 100%; border-collapse: collapse; border-top: 2px solid var(--ink); font-size: 14px; }
+  td { padding: 12px 0; border-bottom: 1px solid var(--hairline); }
+  td.r { text-align: right; }
+  .sub { font-size: 12px; color: var(--muted); }
+  .tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--hairline); margin-top: 2px; }
+  .tabs a { padding: 12px 0; font-size: 13.5px; font-weight: 700; color: var(--muted); text-decoration: none; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+  .tabs a.on { color: var(--ink); border-bottom-color: var(--accent); }
+
+  /* 1. 대시보드 */
+  .balance { padding: 26px 0 22px; border-bottom: 2px solid var(--ink); }
+  .balance .v { font-size: 40px; letter-spacing: -0.03em; margin-top: 4px; }
+  .balance .v small { font-size: 20px; font-weight: 500; margin-left: 3px; }
+  .kpis { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 2px solid var(--ink); }
+  .kpi { padding: 14px 0; }
+  .kpi + .kpi { border-left: 1px solid var(--hairline); padding-left: 16px; }
+  .kpi .v { font-size: 19px; margin-top: 3px; }
+  .plus { color: var(--accent); }
+
+  /* 2. 회차 상세 */
+  .totals { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 2px solid var(--ink); }
+  .totals div { padding: 13px 0; }
+  .totals div + div { border-left: 1px solid var(--hairline); padding-left: 12px; }
+  .totals .v { font-size: 16px; margin-top: 3px; }
+  .chk { width: 22px; height: 22px; border: 2px solid var(--ink); display: inline-block; vertical-align: middle; }
+  .chk.on { background: var(--accent); border-color: var(--accent); position: relative; }
+  .chk.on::after { content: ''; position: absolute; left: 5px; top: 2px; width: 6px; height: 11px; border: solid #fff; border-width: 0 2.5px 2.5px 0; transform: rotate(43deg); }
+  .unpaid { margin-top: 18px; border: 2px solid var(--ink); padding: 14px; }
+  .unpaid .copy { margin-top: 10px; font-size: 13px; line-height: 1.7; background: #f4f5f6; padding: 10px; }
+
+  /* 3. 지출 */
+  .form { border-bottom: 2px solid var(--ink); padding: 18px 0 22px; }
+  .field { margin-top: 14px; }
+  .field input { width: 100%; border: none; border-bottom: 2px solid var(--ink); padding: 7px 0; font-size: 15px; font-family: var(--sans); outline: none; background: transparent; }
+  .field input.amt { font-family: var(--display); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 20px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .badge { font-family: var(--display); font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; border: 1px solid var(--muted); color: var(--muted); padding: 2px 5px; vertical-align: middle; }
+  .struck { text-decoration: line-through; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 class="page">엔빵 — 화면 시안</h1>
+  <p class="lead">확정된 <strong>스위스 그리드</strong> 방향으로 Plan 02의 3화면을 그렸습니다. 모바일 폭(390px) 기준이고, 데스크톱은 같은 구조를 넓게 씁니다.</p>
+  <p class="note">
+    규칙: 2px 블랙 괘선이 구조를 만들고(카드·그림자·라운드 없음), 금액은 <span class="num">등폭 숫자</span>로 열을 맞추며,
+    <strong style="color:#ff4d00">오렌지는 화면당 한 가지 의미</strong>로만 씁니다 — 대시보드에선 "들어온 돈", 회차에선 "납부 완료", 지출에선 "정정 필요".
+  </p>
+
+  <!-- 1 -->
+  <section class="screen">
+    <div class="screen-head"><span class="screen-no">SCREEN 1</span><h2>모임 대시보드</h2></div>
+    <p class="screen-desc">잔액은 저장된 값이 아니라 원장 합산입니다. 그 아래로 이번 달 납부 현황과 최근 기록.</p>
+    <div class="device"><div class="app">
+      <div class="hdr">
+        <span class="t">배드민턴 클럽</span>
+        <span class="role">총무</span>
+      </div>
+      <div class="tabs">
+        <a href="#" class="on">개요</a><a href="#">회비</a><a href="#">지출</a><a href="#">설정</a>
+      </div>
+      <div class="balance">
+        <div class="label">현재 잔액</div>
+        <div class="v num">212,000<small>원</small></div>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><div class="label">1월 납부</div><div class="v num">18<span style="color:#666;font-weight:500">/20</span></div></div>
+        <div class="kpi"><div class="label">멤버</div><div class="v num">20</div></div>
+      </div>
+      <div style="padding-top:22px">
+        <div class="label">최근 기록</div>
+        <table style="margin-top:10px">
+          <tr><td>1월 회비 <span class="sub">· 민지</span><div class="sub">2026-01-14</div></td><td class="r num plus">+20,000</td></tr>
+          <tr><td>코트 대관<div class="sub">2026-01-12</div></td><td class="r num">−96,000</td></tr>
+          <tr><td>셔틀콕 2박스<div class="sub">2026-01-08</div></td><td class="r num">−52,000</td></tr>
+        </table>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- 2 -->
+  <section class="screen">
+    <div class="screen-head"><span class="screen-no">SCREEN 2</span><h2>회차 상세 — 납부 체크</h2></div>
+    <p class="screen-desc">총무의 주력 화면. 체크 한 번이 원장 기록 한 줄이 됩니다. 하단 미납자 텍스트는 그대로 복사해 카톡에 붙입니다.</p>
+    <div class="device"><div class="app">
+      <div class="hdr">
+        <span class="t"><span class="back">←</span> 2026년 1월</span>
+        <span class="num" style="font-size:14px">20,000<span class="sub" style="font-weight:400">/인</span></span>
+      </div>
+      <div class="totals">
+        <div><div class="label">예상</div><div class="v num">60,000</div></div>
+        <div><div class="label">수납</div><div class="v num plus">40,000</div></div>
+        <div><div class="label">미납</div><div class="v num">20,000</div></div>
+      </div>
+      <table>
+        <tr><td><span class="chk on"></span></td><td style="padding-left:12px">민지 <span class="sub">· 총무</span></td><td class="r sub">01-14</td></tr>
+        <tr><td><span class="chk on"></span></td><td style="padding-left:12px">철수</td><td class="r sub">01-15</td></tr>
+        <tr><td><span class="chk"></span></td><td style="padding-left:12px">영희</td><td class="r sub">미납</td></tr>
+      </table>
+      <div class="unpaid">
+        <div class="label">미납 안내 문구</div>
+        <div class="copy">1월 회비(20,000원) 미납: 영희<br>계좌: 국민 123456-**-****** 엔빵</div>
+        <div style="margin-top:12px"><span class="btn out sm">복사하기</span></div>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- 3 -->
+  <section class="screen">
+    <div class="screen-head"><span class="screen-no">SCREEN 3</span><h2>지출 — 기록과 정정</h2></div>
+    <p class="screen-desc">입력은 금액이 주인공. 잘못 적은 기록은 지우지 않고 정정(역분개)하며, 원본은 취소선으로 남습니다.</p>
+    <div class="device"><div class="app">
+      <div class="hdr">
+        <span class="t"><span class="back">←</span> 지출</span>
+        <span class="num" style="font-size:14px">−148,000</span>
+      </div>
+      <div class="form">
+        <div class="field"><div class="label">금액</div><input class="amt" value="96,000" readonly></div>
+        <div class="row2">
+          <div class="field"><div class="label">날짜</div><input value="2026-01-12" readonly></div>
+          <div class="field"><div class="label">분류</div><input value="코트비" readonly></div>
+        </div>
+        <div class="field"><div class="label">메모</div><input value="1월 2주 대관" readonly></div>
+        <div style="margin-top:20px"><span class="btn">기록하기</span></div>
+      </div>
+      <table>
+        <tr>
+          <td>코트 대관<div class="sub">2026-01-12 · 코트비</div></td>
+          <td class="r"><span class="num">−96,000</span><div style="margin-top:6px"><span class="btn out sm">정정</span></div></td>
+        </tr>
+        <tr>
+          <td class="struck">셔틀콕 3박스 <span class="badge">정정됨</span><div class="sub">2026-01-08</div></td>
+          <td class="r num struck">−78,000</td>
+        </tr>
+        <tr>
+          <td>↳ 정정 <span class="sub">셔틀콕 3박스</span><div class="sub">2026-01-09</div></td>
+          <td class="r num plus">+78,000</td>
+        </tr>
+        <tr>
+          <td>셔틀콕 2박스<div class="sub">2026-01-09 · 장비</div></td>
+          <td class="r"><span class="num">−52,000</span><div style="margin-top:6px"><span class="btn out sm">정정</span></div></td>
+        </tr>
+      </table>
+    </div></div>
+  </section>
+
+  <p class="note" style="margin-top:56px">
+    <strong>확인 부탁드릴 점</strong> — ① 상단 탭(개요·회비·지출·설정) 구조가 편한지 ② 회차 화면의 체크박스+미납 문구 조합이 실제 총무 동선에 맞는지
+    ③ 지출 정정을 "원본 취소선 + 정정 줄 추가"로 다 보여주는 게 나은지, 아니면 기본은 접어두고 펼쳐보게 할지.
+  </p>
+</div>
+</body>
+</html>
