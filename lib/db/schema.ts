@@ -34,3 +34,23 @@ export const ledgerEntries = pgTable('ledger_entries', {
   reversalOf: text('reversal_of').unique(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const duesRounds = pgTable('dues_rounds', {
+  id: text('id').primaryKey(),
+  groupId: text('group_id').notNull().references(() => groups.id),
+  period: text('period').notNull(), // 'YYYY-MM'
+  amountPerPerson: integer('amount_per_person').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  // 한 모임에 같은 달 회차는 하나뿐 — 액션의 사전 확인은 읽고 쓰는 사이가 비어 있어 이 인덱스가 최종 방어선이다.
+  uniqueIndex('dues_rounds_group_period').on(t.groupId, t.period),
+]);
+
+export const duesPayments = pgTable('dues_payments', {
+  id: text('id').primaryKey(),
+  roundId: text('round_id').notNull().references(() => duesRounds.id),
+  membershipId: text('membership_id').notNull().references(() => memberships.id),
+  // 이 납부가 만든 원장 엔트리. 납부 취소 시 이 행은 지우고 원장에는 역분개를 남긴다.
+  ledgerEntryId: text('ledger_entry_id').notNull().references(() => ledgerEntries.id),
+  paidAt: timestamp('paid_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex('dues_payments_round_membership').on(t.roundId, t.membershipId)]);

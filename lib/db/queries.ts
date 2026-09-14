@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, or, sql, sum } from 'drizzle-orm';
+import { and, asc, count, desc, eq, or, sql, sum } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/lib/db';
-import { groups, ledgerEntries, memberships } from '@/lib/db/schema';
+import { duesPayments, duesRounds, groups, ledgerEntries, memberships } from '@/lib/db/schema';
 
 /** 멤버십 확인을 포함한 모임 조회 — 비멤버면 null (페이지에서 notFound 처리). */
 export async function getGroupForMember(groupId: string, userId: string) {
@@ -86,4 +86,45 @@ export async function getExpenseEntries(groupId: string) {
       ),
     )
     .orderBy(desc(ledgerEntries.occurredAt), desc(ledgerEntries.createdAt));
+}
+
+export type RoundWithCount = Awaited<ReturnType<typeof getRoundsWithCounts>>[number];
+
+/**
+ * 회비 회차 목록 + 회차별 납부 인원. 한 번의 쿼리로 끝낸다(N+1 금지).
+ *
+ * dues_rounds LEFT JOIN dues_payments → GROUP BY dues_rounds.id → count(dues_payments.id).
+ * LEFT JOIN이라 납부가 0인 회차도 행이 남고, count()는 NULL을 세지 않으므로 그 행은 0이 된다.
+ * GROUP BY는 PK 하나로 충분하다 — pg가 같은 테이블의 나머지 컬럼을 함수 종속으로 인정한다.
+ *
+ * 정렬은 period 문자열 내림차순 — 'YYYY-MM'은 사전순=시간순이라 날짜 변환 없이 최신 회차가 위로 온다.
+ */
+export async function getRoundsWithCounts(groupId: string) {
+  return db
+    .select({
+      id: duesRounds.id,
+      period: duesRounds.period,
+      amountPerPerson: duesRounds.amountPerPerson,
+      createdAt: duesRounds.createdAt,
+      paidCount: count(duesPayments.id),
+    })
+    .from(duesRounds)
+    .leftJoin(duesPayments, eq(duesPayments.roundId, duesRounds.id))
+    .where(eq(duesRounds.groupId, groupId))
+    .groupBy(duesRounds.id)
+    .orderBy(desc(duesRounds.period));
+}
+
+/** 모임으로 스코프한 회차 단건 — 남의 모임 roundId는 null로 떨어진다(존재 여부도 새지 않는다). */
+export async function getRound(groupId: string, roundId: string) {
+  const rows = await db
+    .select({
+      id: duesRounds.id,
+      period: duesRounds.period,
+      amountPerPerson: duesRounds.amountPerPerson,
+    })
+    .from(duesRounds)
+    .where(and(eq(duesRounds.id, roundId), eq(duesRounds.groupId, groupId)))
+    .limit(1);
+  return rows[0] ?? null;
 }

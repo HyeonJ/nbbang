@@ -1,13 +1,16 @@
+import Link from 'next/link';
 import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
-import { getGroupForMember } from '@/lib/db/queries';
+import { getGroupForMember, getGroupMembers, getRoundsWithCounts } from '@/lib/db/queries';
+import { formatDateKst } from '@/lib/format';
+import { Amount } from '@/components/ui/amount';
+import { Cell, DataTable, Row } from '@/components/ui/data-table';
 import { GroupTabs } from '@/components/ui/group-tabs';
 import { PageHeader } from '@/components/ui/page-header';
+import RoundForm from './round-form';
 
-// 임시 자리표 — Plan 02 Task 8이 회차 목록·생성으로 교체한다.
-// 탭에서 누르면 404가 뜨는 막다른 길을 막기 위한 최소 페이지(리뷰 지적).
-export default async function DuesPlaceholderPage({ params }: { params: Promise<{ groupId: string }> }) {
+export default async function DuesPage({ params }: { params: Promise<{ groupId: string }> }) {
   const { groupId } = await params;
 
   const session = await auth.api.getSession({ headers: await headers() });
@@ -16,13 +19,69 @@ export default async function DuesPlaceholderPage({ params }: { params: Promise<
   const found = await getGroupForMember(groupId, session.user.id);
   if (!found) notFound();
 
+  const isOwner = found.membership.role === 'owner';
+  const [members, rounds] = await Promise.all([getGroupMembers(groupId), getRoundsWithCounts(groupId)]);
+  const memberCount = members.length;
+
   return (
     <main className="mx-auto max-w-3xl px-5 pb-20">
       <PageHeader back={`/groups/${groupId}`} title="회비" />
-      <GroupTabs groupId={groupId} isOwner={found.membership.role === 'owner'} />
-      <p className="mt-7 border-t-2 border-ink py-6 text-[14px] text-muted">
-        회비 회차와 납부 체크는 준비 중입니다.
-      </p>
+      <GroupTabs groupId={groupId} isOwner={isOwner} />
+
+      {isOwner ? (
+        <section className="border-b-2 border-ink py-7" data-testid="round-form">
+          <h2 className="font-display text-[11px] font-bold tracking-[0.14em] text-muted uppercase">회차 만들기</h2>
+          <div className="mt-4">
+            {/* 기본 기간은 서버(KST)에서 계산해 넘긴다 — 클라이언트 시계로 만들면 하이드레이션이 어긋난다. */}
+            <RoundForm groupId={groupId} thisMonth={formatDateKst(new Date()).slice(0, 7)} />
+          </div>
+        </section>
+      ) : null}
+
+      <section className="pt-7">
+        <h2 className="font-display text-[11px] font-bold tracking-[0.14em] text-muted uppercase">회차</h2>
+        <div className="mt-4">
+          <DataTable>
+            {rounds.length === 0 ? (
+              <Row>
+                <Cell className="text-muted">아직 회차가 없습니다.</Cell>
+              </Row>
+            ) : (
+              rounds.map((r) => (
+                <Row key={r.id} testId="round-row">
+                  <Cell>
+                    <Link
+                      href={`/groups/${groupId}/dues/${r.id}`}
+                      data-testid="round-link"
+                      className="num font-bold hover:text-accent"
+                    >
+                      {r.period}
+                    </Link>
+                  </Cell>
+                  <Cell align="right" className="text-muted">
+                    <span className="font-display mr-1.5 text-[10px] font-bold tracking-[0.14em] uppercase">
+                      1인
+                    </span>
+                    <Amount value={r.amountPerPerson} size="md" />
+                  </Cell>
+                  <Cell align="right">
+                    {/* 납부 n/N — N은 '지금 명단'이다. 과거 회차도 현재 인원 기준으로 읽힌다(roundTotals와 같은 한계). */}
+                    <span className="num" data-testid="round-paid-count">
+                      {r.paidCount}/{memberCount}
+                    </span>
+                  </Cell>
+                  <Cell align="right">
+                    {/* 수납액 = 1인 금액 × 납부 인원 (roundTotals.collected와 같은 규칙 — 여기는 인원 수만 있다). */}
+                    <span data-testid="round-collected">
+                      <Amount value={r.amountPerPerson * r.paidCount} size="md" unit />
+                    </span>
+                  </Cell>
+                </Row>
+              ))
+            )}
+          </DataTable>
+        </div>
+      </section>
     </main>
   );
 }

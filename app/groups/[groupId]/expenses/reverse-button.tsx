@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useAction } from 'next-safe-action/hooks';
 import { reverseEntry } from '@/actions/ledger';
 import { Button } from '@/components/ui/button';
@@ -13,13 +14,22 @@ const ERRORS: Record<string, string> = {
 };
 
 export default function ReverseButton({ groupId, entryId }: { groupId: string; entryId: string }) {
-  const { execute, isPending, result } = useAction(reverseEntry);
+  const router = useRouter();
+  const { execute, isPending, result } = useAction(reverseEntry, {
+    onError({ error }) {
+      // 페이지를 띄운 뒤 세션이 만료된 경우 — 일반 실패 문구로 덮지 않고 로그인으로 보낸다(join-form.tsx와 같은 처리).
+      if (error.serverError === 'UNAUTHENTICATED') {
+        router.push(`/login?next=/groups/${groupId}/expenses`);
+      }
+    },
+  });
 
-  const errorMessage = result.serverError
-    ? (ERRORS[result.serverError] ?? '정정에 실패했습니다. 잠시 후 다시 시도해 주세요.')
-    : result.validationErrors
-      ? '기록을 찾을 수 없습니다.'
-      : null;
+  const errorMessage =
+    result.serverError && result.serverError !== 'UNAUTHENTICATED'
+      ? (ERRORS[result.serverError] ?? '정정에 실패했습니다. 잠시 후 다시 시도해 주세요.')
+      : result.validationErrors
+        ? '기록을 찾을 수 없습니다.'
+        : null;
 
   return (
     <>

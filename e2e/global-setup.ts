@@ -54,6 +54,7 @@ export default async function globalSetup() {
   // 대화형으로 물어 비-TTY(CI)에서 죽었다 — --force도 그 프롬프트는 건너뛰지 못한다.)
   execSync('npx drizzle-kit push --force', { stdio: 'inherit', env: process.env });
 
-  // ledger_entries는 groups FK로 CASCADE에 걸리지만, 지워지는 테이블은 이름으로 남겨둔다.
-  await sql`TRUNCATE TABLE ledger_entries, memberships, groups, session, account, verification, "user" CASCADE`;
+  // CASCADE가 FK로 딸린 테이블까지 알아서 비우지만, 지워지는 테이블은 이름으로 남겨둔다 —
+  // 목록을 읽으면 "E2E가 무엇을 초기화하는지"가 드러나야 한다.
+  await sql`TRUNCATE TABLE dues_payments, dues_rounds, ledger_entries, memberships, groups, session, account, verification, "user" CASCADE`;
 }
