@@ -9,6 +9,7 @@ import { Cell, DataTable, Row } from '@/components/ui/data-table';
 import { GroupTabs } from '@/components/ui/group-tabs';
 import { PageHeader } from '@/components/ui/page-header';
 import ExpenseForm from './expense-form';
+import ReverseButton from './reverse-button';
 
 export default async function ExpensesPage({ params }: { params: Promise<{ groupId: string }> }) {
   const { groupId } = await params;
@@ -106,6 +107,12 @@ export default async function ExpensesPage({ params }: { params: Promise<{ group
                       >
                         <Amount value={e.amount} size="md" showSign />
                       </span>
+                      {/* 정정된 행은 뱃지가 그 자리를 대신한다 — 다시 정정할 수 없으니 버튼도 없다. */}
+                      {isOwner && !reversal ? (
+                        <div className="mt-1.5">
+                          <ReverseButton groupId={groupId} entryId={e.id} />
+                        </div>
+                      ) : null}
                     </Cell>
                   </Row>
                 );

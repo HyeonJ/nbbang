@@ -63,6 +63,10 @@ export default function ExpenseForm({ groupId, today }: { groupId: string; today
           data-testid="expense-amount-input"
           type="number"
           inputMode="numeric"
+          // 브라우저 기본 피드백용 — 진짜 규칙은 서버 zod(정수·1 이상·1억 이하)가 들고 있다.
+          min={1}
+          max={100000000}
+          step={1}
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           required
