@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, sql, sum } from 'drizzle-orm';
+import { and, asc, desc, eq, or, sql, sum } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/lib/db';
 import { groups, ledgerEntries, memberships } from '@/lib/db/schema';
 
@@ -52,4 +53,37 @@ export async function getRecentEntries(groupId: string, limit = 10) {
     .where(eq(ledgerEntries.groupId, groupId))
     .orderBy(desc(ledgerEntries.occurredAt), desc(ledgerEntries.createdAt))
     .limit(limit);
+}
+
+export type ExpenseEntry = Awaited<ReturnType<typeof getExpenseEntries>>[number];
+
+/**
+ * 지출 화면이 쓰는 원장 조각 — EXPENSE 엔트리 + "그 EXPENSE를 겨눈" REVERSAL 엔트리.
+ *
+ * 자기 조인 한 번으로 끝낸다(N+1 금지): 각 행을 reversal_of로 자기 테이블에 LEFT JOIN해
+ * 대상의 type을 같이 읽고, `type='EXPENSE' OR 대상.type='EXPENSE'`로 거른다.
+ * REVERSAL만 reversal_of를 갖기 때문에 두 번째 조건은 회비 납부의 역분개를 걸러낸다.
+ */
+export async function getExpenseEntries(groupId: string) {
+  const target = alias(ledgerEntries, 'reversal_target');
+  return db
+    .select({
+      id: ledgerEntries.id,
+      type: ledgerEntries.type,
+      amount: ledgerEntries.amount,
+      occurredAt: ledgerEntries.occurredAt,
+      category: ledgerEntries.category,
+      memo: ledgerEntries.memo,
+      reversalOf: ledgerEntries.reversalOf,
+      createdAt: ledgerEntries.createdAt,
+    })
+    .from(ledgerEntries)
+    .leftJoin(target, eq(target.id, ledgerEntries.reversalOf))
+    .where(
+      and(
+        eq(ledgerEntries.groupId, groupId),
+        or(eq(ledgerEntries.type, 'EXPENSE'), eq(target.type, 'EXPENSE')),
+      ),
+    )
+    .orderBy(desc(ledgerEntries.occurredAt), desc(ledgerEntries.createdAt));
 }
