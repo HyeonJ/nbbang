@@ -3,6 +3,9 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { authClient } from '@/lib/auth-client';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
+import { PageHeader } from '@/components/ui/page-header';
 
 function LoginForm() {
   const router = useRouter();
@@ -45,69 +48,93 @@ function LoginForm() {
     }
   }
 
+  // 모임 내 탭과 같은 문법 — 활성 표시는 오렌지 밑줄 + 글자색 두 가지로 준다.
+  const tabClass = (on: boolean) =>
+    `-mb-px border-b-[3px] py-3 text-[13.5px] font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
+      on ? 'border-accent text-ink' : 'border-transparent text-muted hover:text-ink'
+    }`;
+
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <h1 className="mb-4 text-xl font-semibold text-gray-900">엔빵</h1>
-        <div className="mb-6 flex rounded-md border border-gray-200 p-1 text-sm">
+    <main className="mx-auto max-w-3xl px-5 pb-20">
+      <PageHeader
+        title="엔빵"
+        right={
+          <span className="font-display text-[11px] font-medium tracking-[0.18em] text-muted uppercase">
+            Group Dues Ledger
+          </span>
+        }
+      />
+
+      <div className="max-w-sm">
+        <nav aria-label="로그인·가입 전환" className="flex gap-5 border-b border-hairline">
           <button
             type="button"
-            className={`flex-1 rounded py-1.5 ${!isSignup ? 'bg-gray-900 text-white' : 'text-gray-500'}`}
+            className={tabClass(!isSignup)}
+            aria-current={!isSignup ? 'page' : undefined}
             data-testid="auth-toggle-login"
-            onClick={() => { setMode('login'); setError(null); }}
+            onClick={() => {
+              setMode('login');
+              setError(null);
+            }}
           >
             로그인
           </button>
           <button
             type="button"
-            className={`flex-1 rounded py-1.5 ${isSignup ? 'bg-gray-900 text-white' : 'text-gray-500'}`}
+            className={tabClass(isSignup)}
+            aria-current={isSignup ? 'page' : undefined}
             data-testid="auth-toggle"
-            onClick={() => { setMode('signup'); setError(null); }}
+            onClick={() => {
+              setMode('signup');
+              setError(null);
+            }}
           >
             가입
           </button>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-3">
+        </nav>
+
+        <form onSubmit={handleSubmit} className="mt-7 space-y-6">
           {isSignup && (
-            <input
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            <Field
+              label="이름"
               data-testid="auth-name"
               type="text"
-              placeholder="이름"
+              autoComplete="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
             />
           )}
-          <input
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          <Field
+            label="이메일"
             data-testid="auth-email"
             type="email"
-            placeholder="이메일"
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
           />
-          <input
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          <Field
+            label="비밀번호"
+            hint="8자 이상"
             data-testid="auth-password"
             type="password"
-            placeholder="비밀번호 (8자 이상)"
+            autoComplete={isSignup ? 'new-password' : 'current-password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             minLength={8}
             required
           />
-          <button
-            className="w-full rounded-md bg-gray-900 py-2 text-sm font-medium text-white disabled:opacity-50"
-            data-testid="auth-submit"
-            type="submit"
-            disabled={pending}
-          >
+          <Button className="w-full" data-testid="auth-submit" type="submit" disabled={pending}>
             {pending ? '처리 중…' : isSignup ? '가입하기' : '로그인'}
-          </button>
+          </Button>
         </form>
-        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+
+        {error && (
+          <p role="alert" className="mt-6 border-l-2 border-ink pl-3 text-[13px] leading-[1.7]">
+            {error}
+          </p>
+        )}
       </div>
     </main>
   );

@@ -5,6 +5,10 @@
 @theme {
   --color-ink: #0a0a0a;
   --color-accent: #ff4d00;
+  /* 같은 인터내셔널 오렌지 계열의 짙은 변형. #ff4d00은 흰 바탕에서 3.6:1이라 소형 텍스트
+     AA(4.5:1)를 못 넘긴다 — 15px 이하 오렌지 글자에는 이 값(4.98:1)을 쓴다.
+     괘선·탭 밑줄 같은 비텍스트 요소는 3:1이면 되므로 --color-accent 그대로 쓴다. */
+  --color-accent-deep: #cc3c00;
   --color-muted: #666666;
   --color-paper: #ffffff;
   --color-hairline: #d8d8d8;

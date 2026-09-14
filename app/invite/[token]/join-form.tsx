@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAction } from 'next-safe-action/hooks';
 import { joinByInvite } from '@/actions/membership';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
 
 export default function JoinForm({ token }: { token: string }) {
   const router = useRouter();
@@ -32,31 +34,29 @@ export default function JoinForm({ token }: { token: string }) {
 
   return (
     <form
-      className="space-y-3"
+      className="space-y-6"
       onSubmit={(e) => {
         e.preventDefault();
         execute({ token, displayName });
       }}
     >
-      <input
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+      <Field
+        label="모임에서 쓸 내 이름"
         data-testid="join-display-name"
         type="text"
-        placeholder="모임에서 쓸 내 이름"
         value={displayName}
         onChange={(e) => setDisplayName(e.target.value)}
         maxLength={20}
         required
       />
-      <button
-        className="w-full rounded-md bg-gray-900 py-2 text-sm font-medium text-white disabled:opacity-50"
-        data-testid="join-submit"
-        type="submit"
-        disabled={isPending}
-      >
+      <Button className="w-full" data-testid="join-submit" type="submit" disabled={isPending}>
         {isPending ? '합류 중…' : '합류하기'}
-      </button>
-      {errorMessage && <p className="text-sm text-red-600">{errorMessage}</p>}
+      </Button>
+      {errorMessage && (
+        <p role="alert" className="border-l-2 border-ink pl-3 text-[13px] leading-[1.7]">
+          {errorMessage}
+        </p>
+      )}
     </form>
   );
 }

@@ -30,7 +30,10 @@ export function reversalAmount(target: LedgerEntryLike): number {
   return -target.amount;
 }
 
-/** 역분개 가능 여부. 같은 대상에 두 번, 역분개의 역분개는 금지한다. */
+/**
+ * 역분개 가능 여부. 같은 대상에 두 번, 역분개의 역분개는 금지한다.
+ * 호출자는 target과 같은 모임으로 스코프된 엔트리를 넘겨야 한다 — 그룹 경계는 액션 레이어가 보장한다.
+ */
 export function assertReversible(
   target: LedgerEntryLike,
   groupEntries: readonly LedgerEntryLike[],

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAction } from 'next-safe-action/hooks';
 import { regenerateInviteToken } from '@/actions/group';
+import { Button } from '@/components/ui/button';
 
 export default function InviteLinkPanel({ groupId, initialToken }: { groupId: string; initialToken: string }) {
   const [token, setToken] = useState(initialToken);
@@ -40,34 +41,31 @@ export default function InviteLinkPanel({ groupId, initialToken }: { groupId: st
   }
 
   return (
-    <div className="space-y-3">
-      <p
-        className="break-all rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700"
-        data-testid="invite-link"
-      >
+    <div>
+      <p className="num border-2 border-ink p-3 text-[13px] leading-[1.6] font-medium break-all" data-testid="invite-link">
         {inviteUrl}
       </p>
-      <div className="flex gap-2">
-        <button
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-500"
-          data-testid="invite-copy"
-          type="button"
-          onClick={copy}
-        >
-          {copied ? '복사됨' : '복사'}
-        </button>
-        <button
-          className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:border-red-500 disabled:opacity-50"
+      <div className="mt-4 flex flex-wrap gap-3">
+        <Button variant="outline" data-testid="invite-copy" type="button" onClick={copy}>
+          {copied ? '복사됨' : '복사하기'}
+        </Button>
+        <Button
+          variant="outline"
           data-testid="invite-regenerate"
           type="button"
           onClick={regenerate}
           disabled={isPending}
         >
           {isPending ? '재발급 중…' : '재발급'}
-        </button>
+        </Button>
       </div>
+      <p className="mt-3 text-[12px] leading-[1.7] text-muted">
+        재발급하면 기존 링크는 즉시 무효가 됩니다.
+      </p>
       {result.serverError && (
-        <p className="text-sm text-red-600">재발급에 실패했습니다. 잠시 후 다시 시도해 주세요.</p>
+        <p role="alert" className="mt-4 border-l-2 border-ink pl-3 text-[13px] leading-[1.7]">
+          재발급에 실패했습니다. 잠시 후 다시 시도해 주세요.
+        </p>
       )}
     </div>
   );

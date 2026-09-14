@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAction } from 'next-safe-action/hooks';
 import { createGroup } from '@/actions/group';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
 
 export default function NewGroupForm() {
   const router = useRouter();
@@ -18,42 +20,38 @@ export default function NewGroupForm() {
 
   return (
     <form
-      className="space-y-3"
+      className="space-y-6"
       onSubmit={(e) => {
         e.preventDefault();
         execute({ name, displayName });
       }}
     >
-      <input
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+      <Field
+        label="모임 이름"
+        hint="예: 배드민턴 동호회"
         data-testid="group-name"
         type="text"
-        placeholder="모임 이름 (예: 배드민턴 동호회)"
         value={name}
         onChange={(e) => setName(e.target.value)}
         maxLength={50}
         required
       />
-      <input
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+      <Field
+        label="모임에서 쓸 내 이름"
         data-testid="group-display-name"
         type="text"
-        placeholder="모임에서 쓸 내 이름"
         value={displayName}
         onChange={(e) => setDisplayName(e.target.value)}
         maxLength={20}
         required
       />
-      <button
-        className="w-full rounded-md bg-gray-900 py-2 text-sm font-medium text-white disabled:opacity-50"
-        data-testid="group-create"
-        type="submit"
-        disabled={isPending}
-      >
+      <Button className="w-full" data-testid="group-create" type="submit" disabled={isPending}>
         {isPending ? '만드는 중…' : '모임 만들기'}
-      </button>
+      </Button>
       {result.serverError && (
-        <p className="text-sm text-red-600">모임 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.</p>
+        <p role="alert" className="border-l-2 border-ink pl-3 text-[13px] leading-[1.7]">
+          모임 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.
+        </p>
       )}
     </form>
   );
