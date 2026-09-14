@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { authActionClient, ActionError } from './clients';
 import { db } from '@/lib/db';
+import { isUniqueViolation } from '@/lib/db/errors';
 import { groups, memberships } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
@@ -25,7 +26,7 @@ export const joinByInvite = authActionClient
     } catch (e) {
       // 동시 합류 레이스: 유니크 인덱스(memberships_user_group)가 최종 방어선.
       // 진 쪽도 "이미 멤버"와 같은 결과로 본다.
-      if ((e as { code?: string }).code === '23505') {
+      if (isUniqueViolation(e)) {
         revalidatePath('/groups');
         return { groupId: group.id, already: true };
       }
