@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>엔빵 — 시안 선택지 비교</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0a0a0a; --accent: #ff4d00; --muted: #666; --paper: #fff; --hairline: #d8d8d8;
+    --sans: 'Noto Sans KR', system-ui, sans-serif; --display: 'Archivo', system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #eceef0; color: var(--ink); font-family: var(--sans); padding: 40px 16px 90px; }
+  .wrap { max-width: 940px; margin: 0 auto; }
+  h1.page { font-size: 23px; font-weight: 900; letter-spacing: -0.02em; }
+  .lead { margin-top: 8px; color: var(--muted); font-size: 13.5px; line-height: 1.8; }
+
+  .q { margin-top: 52px; }
+  .q-head { border-top: 2px solid var(--ink); padding-top: 12px; }
+  .q-no { font-family: var(--display); font-size: 11px; font-weight: 700; letter-spacing: 0.16em; color: var(--muted); }
+  .q-head h2 { font-size: 17px; font-weight: 900; margin-top: 3px; }
+  .q-head p { color: var(--muted); font-size: 13px; line-height: 1.75; margin-top: 5px; }
+
+  .opts { display: flex; gap: 18px; margin-top: 18px; flex-wrap: wrap; }
+  .opt { flex: 1 1 280px; min-width: 270px; }
+  .opt-tag { display: flex; align-items: baseline; gap: 8px; margin-bottom: 7px; }
+  .opt-tag b { font-family: var(--display); font-size: 12px; letter-spacing: 0.1em; background: var(--ink); color: #fff; padding: 2px 7px; }
+  .opt-tag span { font-size: 13.5px; font-weight: 700; }
+  .opt-why { font-size: 12.5px; color: var(--muted); line-height: 1.7; margin-top: 8px; }
+  .rec { background: var(--accent) !important; }
+
+  .frame { background: var(--paper); border: 1px solid #c9ccd0; padding: 0 16px 18px; }
+  .hdr { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid var(--ink); padding: 13px 0; }
+  .hdr .t { font-size: 16px; font-weight: 900; letter-spacing: -0.02em; }
+  .role { font-family: var(--display); font-size: 9px; font-weight: 700; letter-spacing: 0.12em; color: #fff; background: var(--ink); padding: 2px 6px; }
+  .num { font-family: var(--display); font-variant-numeric: tabular-nums; font-weight: 700; }
+  .label { font-family: var(--display); font-size: 9.5px; font-weight: 700; letter-spacing: 0.13em; color: var(--muted); text-transform: uppercase; }
+  .sub { font-size: 11.5px; color: var(--muted); }
+  .plus { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; border-top: 2px solid var(--ink); font-size: 13px; }
+  td { padding: 9px 0; border-bottom: 1px solid var(--hairline); }
+  td.r { text-align: right; }
+  .bal { padding: 16px 0; border-bottom: 2px solid var(--ink); }
+  .bal .v { font-size: 30px; letter-spacing: -0.03em; margin-top: 2px; }
+  .btn { display: inline-block; background: var(--ink); color: #fff; font-size: 12px; font-weight: 700; padding: 7px 13px; }
+  .btn.out { background: transparent; color: var(--ink); border: 2px solid var(--ink); padding: 5px 11px; }
+  .chk { width: 18px; height: 18px; border: 2px solid var(--ink); display: inline-block; vertical-align: middle; }
+  .chk.on { background: var(--accent); border-color: var(--accent); position: relative; }
+  .chk.on::after { content: ''; position: absolute; left: 4px; top: 1px; width: 5px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(43deg); }
+  .badge { font-family: var(--display); font-size: 9px; font-weight: 700; letter-spacing: 0.08em; border: 1px solid var(--muted); color: var(--muted); padding: 1px 4px; }
+  .struck { text-decoration: line-through; color: var(--muted); }
+
+  /* Q1 네비게이션 변형 */
+  .tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--hairline); }
+  .tabs a { padding: 10px 0; font-size: 12.5px; font-weight: 700; color: var(--muted); text-decoration: none; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+  .tabs a.on { color: var(--ink); border-bottom-color: var(--accent); }
+  .menucards { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 2px solid var(--ink); }
+  .menucards a { padding: 14px 0; text-decoration: none; color: var(--ink); border-top: 1px solid var(--hairline); }
+  .menucards a:nth-child(odd) { padding-right: 12px; }
+  .menucards a:nth-child(even) { border-left: 1px solid var(--hairline); padding-left: 14px; }
+  .menucards .k { font-size: 13.5px; font-weight: 700; }
+  .bottombar { display: flex; border-top: 2px solid var(--ink); margin-top: 14px; }
+  .bottombar a { flex: 1; text-align: center; padding: 11px 0 4px; font-size: 11px; font-weight: 700; color: var(--muted); text-decoration: none; }
+  .bottombar a.on { color: var(--ink); }
+  .bottombar a i { display: block; width: 16px; height: 16px; border: 2px solid currentColor; margin: 0 auto 5px; }
+  .bottombar a.on i { background: var(--accent); border-color: var(--accent); }
+
+  .verdict { margin-top: 14px; border-left: 3px solid var(--accent); padding: 3px 0 3px 13px; font-size: 13px; line-height: 1.8; }
+  .verdict b { font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 class="page">시안 선택지 — 세 가지 갈림길</h1>
+  <p class="lead">앞서 드린 3화면 시안에서 결정이 필요한 지점만 나란히 그렸습니다. 각 질문에서 하나씩 골라주세요 (제 추천은 주황 태그).</p>
+
+  <!-- Q1 -->
+  <section class="q">
+    <div class="q-head">
+      <div class="q-no">QUESTION 1</div>
+      <h2>모임 안에서 화면 이동을 어떻게?</h2>
+      <p>개요 · 회비 · 지출 · 설정 네 곳을 오가는 방법. 총무는 하루에도 여러 번, 멤버는 가끔 들어옵니다.</p>
+    </div>
+    <div class="opts">
+      <div class="opt">
+        <div class="opt-tag"><b class="rec">A · 추천</b><span>상단 탭</span></div>
+        <div class="frame">
+          <div class="hdr"><span class="t">배드민턴 클럽</span><span class="role">총무</span></div>
+          <div class="tabs"><a href="#" class="on">개요</a><a href="#">회비</a><a href="#">지출</a><a href="#">설정</a></div>
+          <div class="bal"><div class="label">현재 잔액</div><div class="v num">212,000<span style="font-size:16px">원</span></div></div>
+          <table>
+            <tr><td>1월 회비 <span class="sub">· 민지</span></td><td class="r num plus">+20,000</td></tr>
+            <tr><td>코트 대관</td><td class="r num">−96,000</td></tr>
+          </table>
+        </div>
+        <p class="opt-why">현재 위치가 늘 보이고 한 번에 이동. 데스크톱에서도 그대로 성립. 탭이 4개라 모바일에서도 안 좁음.</p>
+      </div>
+
+      <div class="opt">
+        <div class="opt-tag"><b>B</b><span>하단 탭바</span></div>
+        <div class="frame">
+          <div class="hdr"><span class="t">배드민턴 클럽</span><span class="role">총무</span></div>
+          <div class="bal"><div class="label">현재 잔액</div><div class="v num">212,000<span style="font-size:16px">원</span></div></div>
+          <table>
+            <tr><td>1월 회비 <span class="sub">· 민지</span></td><td class="r num plus">+20,000</td></tr>
+            <tr><td>코트 대관</td><td class="r num">−96,000</td></tr>
+            <tr><td>셔틀콕 2박스</td><td class="r num">−52,000</td></tr>
+          </table>
+          <div class="bottombar">
+            <a href="#" class="on"><i></i>개요</a><a href="#"><i></i>회비</a><a href="#"><i></i>지출</a><a href="#"><i></i>설정</a>
+          </div>
+        </div>
+        <p class="opt-why">엄지가 닿는 자리 — 모바일 앱다움 최고. 다만 웹에서는 하단 고정바가 스크롤을 가리고, 데스크톱에선 어색해져 별도 레이아웃이 필요.</p>
+      </div>
+
+      <div class="opt">
+        <div class="opt-tag"><b>C</b><span>개요에서 진입</span></div>
+        <div class="frame">
+          <div class="hdr"><span class="t">배드민턴 클럽</span><span class="role">총무</span></div>
+          <div class="bal"><div class="label">현재 잔액</div><div class="v num">212,000<span style="font-size:16px">원</span></div></div>
+          <div class="menucards">
+            <a href="#"><div class="label">회비</div><div class="k">1월 18/20</div></a>
+            <a href="#"><div class="label">지출</div><div class="k">이번 달 3건</div></a>
+            <a href="#"><div class="label">멤버</div><div class="k">20명</div></a>
+            <a href="#"><div class="label">설정</div><div class="k">초대 링크</div></a>
+          </div>
+          <div style="padding-top:12px"><div class="label">최근 기록</div></div>
+          <table style="border-top:none">
+            <tr><td>1월 회비 <span class="sub">· 민지</span></td><td class="r num plus">+20,000</td></tr>
+          </table>
+        </div>
+        <p class="opt-why">개요가 현황판 역할까지 — 진입 카드에 숫자를 실을 수 있어 정보량이 많음. 대신 화면 간 이동은 늘 개요를 거쳐야 해 총무의 반복 작업엔 느림.</p>
+      </div>
+    </div>
+    <p class="verdict"><b>추천 A</b> — 총무는 회비↔지출을 자주 오가는데, C는 매번 개요를 경유해야 하고 B는 웹/데스크톱에서 값이 안 나옵니다.</p>
+  </section>
+
+  <!-- Q2 -->
+  <section class="q">
+    <div class="q-head">
+      <div class="q-no">QUESTION 2</div>
+      <h2>회차 화면 — 무엇을 먼저 보여줄까?</h2>
+      <p>총무의 실제 동선: ① 입금된 사람 체크 ② 아직 안 낸 사람 확인 ③ 단톡방에 독촉 문구 올리기.</p>
+    </div>
+    <div class="opts">
+      <div class="opt">
+        <div class="opt-tag"><b>A</b><span>전체 명단 + 하단 문구</span></div>
+        <div class="frame">
+          <div class="hdr"><span class="t">2026년 1월</span><span class="num" style="font-size:12px">20,000/인</span></div>
+          <table>
+            <tr><td style="width:26px"><span class="chk on"></span></td><td>민지 <span class="sub">· 총무</span></td><td class="r sub">01-14</td></tr>
+            <tr><td><span class="chk on"></span></td><td>철수</td><td class="r sub">01-15</td></tr>
+            <tr><td><span class="chk"></span></td><td>영희</td><td class="r sub">미납</td></tr>
+            <tr><td><span class="chk"></span></td><td>준호</td><td class="r sub">미납</td></tr>
+          </table>
+          <div style="border:2px solid var(--ink);padding:11px;margin-top:14px">
+            <div class="label">미납 안내 문구</div>
+            <div style="background:#f4f5f6;padding:8px;margin-top:7px;font-size:12px;line-height:1.6">1월 회비(20,000원) 미납: 영희, 준호</div>
+            <div style="margin-top:9px"><span class="btn out">복사하기</span></div>
+          </div>
+        </div>
+        <p class="opt-why">명단 순서가 고정이라 "누가 어디쯤"이 기억에 남음. 인원이 많으면 미납자를 찾아 스크롤해야 함.</p>
+      </div>
+
+      <div class="opt">
+        <div class="opt-tag"><b class="rec">B · 추천</b><span>미납 먼저 + 접기</span></div>
+        <div class="frame">
+          <div class="hdr"><span class="t">2026년 1월</span><span class="num" style="font-size:12px">20,000/인</span></div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:2px solid var(--ink)">
+            <div style="padding:10px 0"><div class="label">예상</div><div class="num" style="font-size:14px;margin-top:2px">80,000</div></div>
+            <div style="padding:10px 0 10px 10px;border-left:1px solid var(--hairline)"><div class="label">수납</div><div class="num plus" style="font-size:14px;margin-top:2px">40,000</div></div>
+            <div style="padding:10px 0 10px 10px;border-left:1px solid var(--hairline)"><div class="label">미납</div><div class="num" style="font-size:14px;margin-top:2px">40,000</div></div>
+          </div>
+          <div style="padding-top:12px"><div class="label" style="color:var(--accent)">미납 2명</div></div>
+          <table style="border-top:1px solid var(--ink)">
+            <tr><td style="width:26px"><span class="chk"></span></td><td>영희</td><td class="r"><span class="btn" style="font-size:10px;padding:4px 8px">체크</span></td></tr>
+            <tr><td><span class="chk"></span></td><td>준호</td><td class="r"><span class="btn" style="font-size:10px;padding:4px 8px">체크</span></td></tr>
+          </table>
+          <div style="padding-top:12px"><div class="label">납부 완료 2명 <span style="color:var(--muted)">▾</span></div></div>
+          <div style="background:#f4f5f6;padding:8px;margin-top:11px;font-size:12px;line-height:1.6">1월 회비(20,000원) 미납: 영희, 준호</div>
+          <div style="margin-top:9px"><span class="btn out">복사하기</span></div>
+        </div>
+        <p class="opt-why">할 일(미납)이 맨 위, 끝난 사람은 접힘. 20명 모임에서도 스크롤 없이 처리. 순서가 바뀌는 게 낯설 수 있음.</p>
+      </div>
+    </div>
+    <p class="verdict"><b>추천 B</b> — 이 화면의 목적은 "명단 열람"이 아니라 "미납 처리"입니다. 인원이 늘수록 격차가 벌어집니다.</p>
+  </section>
+
+  <!-- Q3 -->
+  <section class="q">
+    <div class="q-head">
+      <div class="q-no">QUESTION 3</div>
+      <h2>정정된 지출을 어떻게 보여줄까?</h2>
+      <p>원장은 지우지 않습니다(ADR-001). 취소 기록이 반드시 남는데, 그걸 목록에 다 드러낼지가 문제입니다.</p>
+    </div>
+    <div class="opts">
+      <div class="opt">
+        <div class="opt-tag"><b>A</b><span>원장 그대로 (두 줄)</span></div>
+        <div class="frame">
+          <div class="hdr"><span class="t">지출</span><span class="num" style="font-size:12px">−148,000</span></div>
+          <table>
+            <tr><td>코트 대관<div class="sub">2026-01-12</div></td><td class="r num">−96,000</td></tr>
+            <tr><td class="struck">셔틀콕 3박스 <span class="badge">정정됨</span><div class="sub">2026-01-08</div></td><td class="r num struck">−78,000</td></tr>
+            <tr><td>↳ 정정 <span class="sub">셔틀콕 3박스</span><div class="sub">2026-01-09</div></td><td class="r num plus">+78,000</td></tr>
+            <tr><td>셔틀콕 2박스<div class="sub">2026-01-09</div></td><td class="r num">−52,000</td></tr>
+          </table>
+        </div>
+        <p class="opt-why">화면과 원장이 1:1 — "합계가 왜 이렇지?"를 화면만 보고 검산 가능. 정정이 쌓이면 목록이 두 배로 길어짐.</p>
+      </div>
+
+      <div class="opt">
+        <div class="opt-tag"><b class="rec">B · 추천</b><span>한 줄로 접고, 펼치면 전부</span></div>
+        <div class="frame">
+          <div class="hdr"><span class="t">지출</span><span class="num" style="font-size:12px">−148,000</span></div>
+          <table>
+            <tr><td>코트 대관<div class="sub">2026-01-12</div></td><td class="r num">−96,000</td></tr>
+            <tr><td class="struck">셔틀콕 3박스 <span class="badge">정정됨</span><div class="sub">2026-01-08 · 01-09 취소 ▾</div></td><td class="r num struck">−78,000</td></tr>
+            <tr><td>셔틀콕 2박스<div class="sub">2026-01-09</div></td><td class="r num">−52,000</td></tr>
+          </table>
+          <div style="margin-top:12px;border-top:1px solid var(--hairline);padding-top:10px">
+            <span class="sub">원장 전체 보기 (정정 기록 포함) →</span>
+          </div>
+        </div>
+        <p class="opt-why">평소엔 "살아있는 지출"만 읽힘. 정정 사실은 취소선·뱃지로 남고, 펼치거나 원장 전체 보기로 언제든 확인 가능.</p>
+      </div>
+    </div>
+    <p class="verdict"><b>추천 B</b> — 투명성은 "항상 눈앞에"가 아니라 "언제든 확인 가능"으로 충분합니다. 다만 <b>공개 장부(Plan 03)</b>에서는 A처럼 전부 보여주는 게 맞습니다 — 그 화면의 목적이 곧 검증이니까요.</p>
+  </section>
+</div>
+</body>
+</html>
