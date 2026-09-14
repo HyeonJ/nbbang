@@ -47,11 +47,17 @@ export default async function globalSetup() {
     }
   }
 
+  // push 전에 센티널을 먼저 지운다. 센티널은 스키마에 없어 push의 '삭제 대상'인데,
+  // 같은 push에 '생성 대상' 테이블이 하나라도 있으면 drizzle-kit이
+  // "새 테이블인가 rename인가"를 대화형으로 묻고 비-TTY(CI)에서는 그대로 죽는다 — --force도 이 프롬프트는 건너뛰지 않는다.
+  // 삭제 대상을 0으로 만들어 프롬프트 자체를 없앤다. 가드 검사는 이미 위에서 끝났다.
+  await sql`drop table if exists e2e_sentinel`;
+
   execSync('npx drizzle-kit push --force', { stdio: 'inherit', env: process.env });
 
-  // push --force는 스키마에 없는 e2e_sentinel을 지운다 — 검사를 통과한 DB이므로 다시 세워 다음 실행을 보장한다.
-  // (검사는 push보다 앞서 끝났으므로 이 재생성이 가드를 약화시키지 않는다.)
+  // 검사를 통과한 DB이므로 다시 세워 다음 실행을 보장한다.
   await sql`create table if not exists e2e_sentinel()`;
 
-  await sql`TRUNCATE TABLE memberships, groups, session, account, verification, "user" CASCADE`;
+  // ledger_entries는 groups FK로 CASCADE에 걸리지만, 지워지는 테이블은 이름으로 남겨둔다.
+  await sql`TRUNCATE TABLE ledger_entries, memberships, groups, session, account, verification, "user" CASCADE`;
 }

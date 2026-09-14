@@ -1,8 +1,10 @@
 import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
-import { getGroupForMember, getGroupMembers } from '@/lib/db/queries';
+import { getBalance, getGroupForMember, getGroupMembers, getRecentEntries } from '@/lib/db/queries';
+import { formatDateKst } from '@/lib/format';
 import { Amount } from '@/components/ui/amount';
+import { Cell, DataTable, Row } from '@/components/ui/data-table';
 import { GroupTabs } from '@/components/ui/group-tabs';
 import { PageHeader, RoleBadge } from '@/components/ui/page-header';
 
@@ -16,7 +18,11 @@ export default async function GroupDashboardPage({ params }: { params: Promise<{
   if (!found) notFound();
 
   const { group, membership } = found;
-  const members = await getGroupMembers(groupId);
+  const [members, balance, recent] = await Promise.all([
+    getGroupMembers(groupId),
+    getBalance(groupId),
+    getRecentEntries(groupId),
+  ]);
 
   return (
     <main className="mx-auto max-w-3xl px-5 pb-20">
@@ -31,8 +37,8 @@ export default async function GroupDashboardPage({ params }: { params: Promise<{
       <section className="border-b-2 border-ink py-7">
         <h2 className="font-display text-[11px] font-bold tracking-[0.14em] text-muted uppercase">현재 잔액</h2>
         <p className="mt-1" data-testid="group-balance">
-          {/* Plan 02 Task 4에서 원장(ledger_entries) 합산으로 교체 — 잔액은 저장하지 않는 파생값 */}
-          <Amount value={0} size="xl" unit />
+          {/* 저장된 잔액 컬럼은 없다 — 매 요청 원장 합산으로만 구한다 (ADR-001) */}
+          <Amount value={balance} size="xl" unit />
         </p>
       </section>
 
@@ -52,9 +58,30 @@ export default async function GroupDashboardPage({ params }: { params: Promise<{
 
       <section className="pt-7">
         <h2 className="font-display text-[11px] font-bold tracking-[0.14em] text-muted uppercase">최근 기록</h2>
-        <p className="mt-4 border-t-2 border-ink py-6 text-[14px] text-muted">
-          아직 기록이 없습니다. 회비·지출은 준비 중입니다.
-        </p>
+        <div className="mt-4">
+          <DataTable>
+            {recent.length === 0 ? (
+              <Row>
+                <Cell className="text-muted">아직 기록이 없습니다.</Cell>
+              </Row>
+            ) : (
+              recent.map((e) => (
+                <Row key={e.id} testId="recent-entry-row">
+                  <Cell className="num w-[92px] text-muted">{formatDateKst(e.occurredAt)}</Cell>
+                  <Cell>
+                    {e.memo ?? (e.category ?? '기록')}
+                    {e.memo && e.category ? (
+                      <span className="ml-2 text-[12px] text-muted">{e.category}</span>
+                    ) : null}
+                  </Cell>
+                  <Cell align="right">
+                    <Amount value={e.amount} size="md" showSign />
+                  </Cell>
+                </Row>
+              ))
+            )}
+          </DataTable>
+        </div>
       </section>
     </main>
   );
