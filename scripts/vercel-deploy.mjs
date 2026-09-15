@@ -15,6 +15,12 @@
  * 왜 폴링하는가: POST는 배포를 큐에 넣고 즉시 200을 준다. 폴링하지 않으면 빌드가 깨져도
  * 잡이 초록이 되어, 이 잡이 유일한 배포 경로라는 설계 자체가 무의미해진다.
  *
+ * 왜 별칭까지 폴링하는가: READY는 "빌드가 끝났다"는 뜻일 뿐, 프로덕션 별칭이 이 배포로
+ * 옮겨졌다는 뜻이 아니다. READY 직후 aliasAssigned는 잠깐 false다. 그 순간을 보고
+ * 성공으로 끝내면 **트래픽이 이전 배포에 남아 있는데도 잡이 초록이 된다** — 이 잡이
+ * 막으려는 바로 그 상태다. 그래서 별칭이 정해질 때까지(aliasAssigned 또는 aliasError)
+ * 폴링을 끝내지 않고, 끝까지 안 붙으면 실패로 끝낸다. 대기는 아래 10분 데드라인이 막는다.
+ *
  * 필요 env: VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_REPO_ID, VERCEL_GIT_REF, GITHUB_SHA
  * 토큰은 절대 출력하지 않는다. 응답 본문도 통째로 찍지 않고 필요한 필드만 찍는다.
  */
@@ -92,6 +98,11 @@ async function main() {
     let state = null;
     let deployment = null;
 
+    /** 별칭이 정해졌는가 — 붙었거나(assigned) 붙이다 실패했거나(error). 둘 다 아니면 아직 진행 중이다. */
+    const aliasSettled = () => Boolean(deployment?.aliasAssigned || deployment?.aliasError);
+    /** 판정 가능한 최종 상태인가. READY는 별칭까지 정해져야 최종이다. */
+    const isSettled = () => TERMINAL.has(state) && (state !== 'READY' || aliasSettled());
+
     while (Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
 
@@ -106,7 +117,8 @@ async function main() {
             state = deployment.readyState;
             console.log(`  상태: ${state}`);
         }
-        if (TERMINAL.has(state)) {
+        // READY만으로는 빠져나가지 않는다 — 별칭이 정해질 때까지 계속 폴링한다.
+        if (isSettled()) {
             break;
         }
     }
@@ -121,14 +133,14 @@ async function main() {
         throw new DeployError('배포가 실패했습니다 — Vercel 대시보드의 빌드 로그를 보세요.');
     }
 
-    // READY인데 별칭이 안 붙으면 프로덕션 트래픽은 이전 배포에 그대로 남는다 — 조용히 넘기면 안 된다.
     if (deployment.aliasError) {
         const { code, message } = deployment.aliasError;
         throw new DeployError(`별칭 할당 실패: ${code ?? '?'} ${message ?? ''}`);
     }
+    // 데드라인까지 폴링해도 별칭이 안 붙은 경우다. 경고로 넘기면 "초록인데 프로덕션은
+    // 이전 배포" 상태가 성공으로 보고된다 — 이 잡이 존재하는 이유가 사라진다.
     if (!deployment.aliasAssigned) {
-        report('경고: aliasAssigned가 false다 — 프로덕션 별칭이 아직 이 배포를 가리키지 않는다.');
-        return;
+        throw new DeployError('READY지만 프로덕션 별칭이 이 배포를 가리키지 않는다 — 트래픽은 이전 배포에 남아 있다.');
     }
     const aliases = (deployment.alias ?? []).map((a) => `https://${a}`).join(' ');
     report(`프로덕션 별칭: ${aliases || '(목록 없음)'}`);
