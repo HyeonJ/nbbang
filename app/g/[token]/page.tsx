@@ -22,9 +22,23 @@ import { Cell, DataTable, Row } from '@/components/ui/data-table';
  *     서버 지역 변수가 저절로 새지는 않지만, 직렬화된 prop은 확실하게 샌다.
  */
 
-// 캐시 금지 3종. 토큰을 재발급하면 옛 링크가 **즉시** 죽어야 한다 — 어딘가에 저장된 응답이
-// 살아 있으면 "재발급했으니 안전하다"가 거짓이 된다. 응답 헤더(`Cache-Control: private, no-store`)는
-// next.config.ts의 headers()가 `/g/:token*`에 건다. 여기 세 줄은 Next 내부(렌더 캐시·fetch 캐시) 몫이다.
+/**
+ * 캐시 금지. 토큰을 재발급하면 옛 링크가 **즉시** 죽어야 한다 — 어딘가에 저장된 응답이
+ * 살아 있으면 "재발급했으니 안전하다"가 거짓이 된다.
+ *
+ * 실제로 일하는 것이 무엇인지 구별해 적어둔다(2026-09-15 실측):
+ *  - `dynamic = 'force-dynamic'` — 매 요청 SSR. 빌드 출력에서 이 라우트가 `ƒ`(Dynamic)로
+ *    찍히는 것이 증거다. Next의 렌더 캐시를 끄는 실질적 장치.
+ *  - **응답 헤더 `Cache-Control: private, no-store`** — CDN·브라우저·중간 프록시를 막는
+ *    유일한 수단이다. Next 내부 설정은 이들에게 보이지 않는다. `next.config.ts`의
+ *    `headers()`가 `/g/:token*`에 건다.
+ *  - `revalidate = 0` — force-dynamic과 겹치지만 의도를 명시적으로 남긴다.
+ *  - `fetchCache = 'force-no-store'` — **이 라우트에서는 아무 일도 하지 않는다.** 이 설정은
+ *    세그먼트 안의 `fetch()` 호출만 지배하는데, `lib/db/index.ts`는 `neon-serverless`
+ *    (WebSocket Pool)를 쓰므로 DB 왕복이 `fetch()`를 거치지 않는다(neon-http였다면 지배했다).
+ *    플랜은 이것을 캐시 방어 3종의 하나로 적었지만 실제 방어는 위의 둘이다. 빌드가 받아들이고
+ *    해가 없으므로 남겨두되, **이 줄을 캐시 방어로 믿지 말 것**.
+ */
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
