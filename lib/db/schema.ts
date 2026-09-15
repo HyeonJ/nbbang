@@ -57,3 +57,4 @@ export const duesPayments = pgTable('dues_payments', {
 
 // 드리프트 가드 증명용 주석 (proof 1) — 이 커밋은 마이그레이션이 없다.
 // 드리프트 가드 증명 2 — 푸시된 범위(before..after) 경로.
+// 드리프트 가드 증명 4 — 마이그레이션과 함께 바뀐 커밋.
