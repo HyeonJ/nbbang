@@ -101,3 +101,10 @@ export const duesPayments = pgTable('dues_payments', {
     name: 'dues_payments_entry_fk',
   }),
 ]);
+
+// 드리프트 가드 증명용 임시 테이블 — 이 브랜치는 증명 후 삭제한다.
+// 이쪽은 마이그레이션을 함께 만들었다: check 잡이 통과해야 한다.
+// 기존 테이블을 건드리지 않는 독립 테이블이라 test DB에 남아도 무해하다(drop table 한 줄).
+export const driftProbeScratch = pgTable('drift_probe_scratch', {
+  id: text('id').primaryKey(),
+});
