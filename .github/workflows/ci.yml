@@ -98,6 +98,19 @@ jobs:
       # 지금까지 성공해 온 Git 배포와 같은 빌드 환경을 유지하고, 프로덕션 자격증명을
       # 러너 파일시스템(.vercel/.env.production.local)에 내려받지 않는다.
       # .vercel/은 gitignore돼 있어 체크아웃에 없다 — ORG/PROJECT ID를 env로 주면 링크 없이 배포된다.
+      # 임시 진단 — VERCEL_TOKEN이 어떤 스코프를 보는지 확인한다. 원인을 찾으면 삭제한다.
+      - name: (임시) 토큰 스코프 진단
+        continue-on-error: true
+        run: |
+          echo "토큰 길이(공백 제외): $(printf '%s' "$VERCEL_TOKEN" | tr -d '[:space:]' | wc -c)"
+          echo "원본 길이: $(printf '%s' "$VERCEL_TOKEN" | wc -c)"
+          echo "--- whoami"; npx --yes vercel@51 whoami --token "$VERCEL_TOKEN" || echo "whoami 실패"
+          echo "--- teams ls"; npx --yes vercel@51 teams ls --token "$VERCEL_TOKEN" || echo "teams 실패"
+          echo "--- project ls"; npx --yes vercel@51 project ls --token "$VERCEL_TOKEN" || echo "project 실패"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_Fw7fjivbiHUvhwLS52TEFl5N
+          VERCEL_PROJECT_ID: prj_i7EtOouVzfqcORSYuZKAOqefMZnG
       - name: Vercel 프로덕션 배포
         run: npx --yes vercel@51 deploy --prod --yes --token "$VERCEL_TOKEN"
         env:
