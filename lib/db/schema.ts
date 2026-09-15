@@ -17,6 +17,23 @@ export const groups = pgTable('groups', {
   name: text('name').notNull(),
   inviteToken: text('invite_token').notNull().unique(),
   publicToken: text('public_token').notNull().unique(),
+  /**
+   * 미납 안내 문구에 붙일 입금 계좌 — 총무가 직접 입력하는 **자유 텍스트**다.
+   * 예: '카카오뱅크 3333-01-1234567 정현인'. 은행·번호·예금주로 쪼개지 않는다:
+   * 검증할 수도 없고(은행별 자릿수가 다르다), 쪼개면 세 칸을 모두 채우게 강요한다.
+   *
+   * ⚠️ 노출 범위는 **세 줄로 고정**이다 (외부 리뷰 MINOR 17):
+   *   ① 인증된 멤버가 보는 회차 화면의 미납 안내 문구에만 나온다(총무·멤버 모두 — 멤버도 입금한다).
+   *      **정산 공유 문구에는 넣지 않는다** — 정산의 채권자는 선결제한 멤버이고 모임 계좌가
+   *      아니다(ADR-003). 거기에 이 줄을 붙이면 돈을 엉뚱한 곳으로 보내라고 말하는 셈이다.
+   *   ② 공개 장부(`/g/:token`)에는 **절대** 나오지 않는다 — `public-queries.ts`의 select에 없다.
+   *   ③ CSV 내보내기에 **넣지 않는다** — 그것은 원장 내보내기이지 모임 설정 내보내기가 아니다.
+   * ②·③은 `e2e/public-ledger.spec.ts`와 `e2e/ledger.spec.ts`의 금칙 목록이 각각 지킨다.
+   *
+   * `null` = 계좌 없음. 빈 문자열은 저장하지 않는다(액션이 `''`를 `null`로 접는다) —
+   * 두 값이 공존하면 "계좌가 있는가"가 두 개의 진실로 갈라진다.
+   */
+  accountLabel: text('account_label'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

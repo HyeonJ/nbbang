@@ -1,9 +1,19 @@
 import { test, expect, type Page } from '@playwright/test';
-import { neon } from '@neondatabase/serverless';
-import { createGroup, exactAmount, INVITE_JOIN_URL, newClientContext, signUp, testEmail } from './helpers';
+import {
+  createGroup,
+  exactAmount,
+  groupForbiddenValues,
+  INVITE_JOIN_URL,
+  newClientContext,
+  signUp,
+  testEmail,
+} from './helpers';
 
-// global-setup이 센티널·dev DB 가드를 통과시킨 테스트 브랜치. 여기서는 **읽기만** 한다.
-const sql = neon(process.env.DATABASE_URL!);
+/**
+ * 입금 계좌 문구(Task 10) — **다른 어떤 픽스처도 만들 수 없는 값**으로 둔다.
+ * 공개 장부 스펙과도 다른 값이다: CSV에서 이 문자열이 잡히면 어느 경로가 샜는지 즉시 갈린다.
+ */
+const ACCOUNT_LABEL = '누출탐지은행 0000-ACCT-LEAK-CSV-8264 민지';
 
 /**
  * 원장 정합성 E2E — 이 스펙의 존재 이유는 "화면이 원장과 어긋나지 않음"을 고정하는 것이다.
@@ -167,7 +177,42 @@ test('지출·회비가 잔액에 정확히 반영되고 정정으로 되돌아�
   await expect(mp.getByTestId('payment-row')).toHaveCount(2);
   await expect(mp.getByTestId('payment-toggle')).toHaveCount(0);
 
-  // ── 9) CSV 내보내기(F7) — 파일이 장부와 같고, 새어선 안 되는 것이 없다 ────────
+  // ── 9) 미납 안내 문구에 입금 계좌가 붙는다 (F6 완결, Task 10) ─────────────────
+  /**
+   * 계좌 **없음 → 있음** 두 상태를 같은 화면에서 본다. 없을 때 빈 `계좌:` 줄이 나가지 않는 것이
+   * 절반이고(그게 `null`로 저장하는 이유다), 있을 때 한 줄이 개행으로 붙는 것이 나머지 절반이다.
+   *
+   * ⚠️ 줄바꿈은 `toHaveText`로 볼 수 없다 — 그 단언은 공백을 정규화해 개행을 스페이스로 접는다.
+   * 문구가 **두 줄**이라는 것이 이 기능의 핵심이므로 `innerText()`(pre-wrap 렌더 결과)를 직접 본다.
+   */
+  const noticeText = async (page: Page) => {
+    await expect(page.getByTestId('unpaid-text')).toContainText('미납: 철수');
+    return (await page.getByTestId('unpaid-text').innerText()).trim();
+  };
+
+  await op.goto(`/groups/${groupId}/dues/${roundId}`);
+  // 철수가 아직 안 냈으므로 안내 문구가 뜬다 — 총무이고 계좌가 없으니 등록 안내도 함께 보인다.
+  expect(await noticeText(op)).toBe('2026-01 회비(20,000원) 미납: 철수');
+  await expect(op.getByTestId('account-hint')).toHaveCount(1);
+
+  await op.goto(`/groups/${groupId}/settings`);
+  await op.getByTestId('account-label').fill(ACCOUNT_LABEL);
+  await op.getByTestId('account-save').click();
+  await expect(op.getByTestId('account-save')).toHaveText('저장됨');
+
+  await op.goto(`/groups/${groupId}/dues/${roundId}`);
+  // 개행까지 그대로 단언한다 — 단톡방에 붙는 문구가 두 줄이어야 한다.
+  expect(await noticeText(op)).toBe(`2026-01 회비(20,000원) 미납: 철수\n계좌: ${ACCOUNT_LABEL}`);
+  // 등록 안내는 사라진다 — 할 일이 끝났으므로.
+  await expect(op.getByTestId('account-hint')).toHaveCount(0);
+
+  // 멤버도 같은 문구를 본다(멤버도 입금해야 한다 — 노출 3줄 규칙의 ①).
+  await mp.goto(`/groups/${groupId}/dues/${roundId}`);
+  await expect(mp.getByTestId('unpaid-text')).toContainText(`계좌: ${ACCOUNT_LABEL}`);
+  // 멤버에게는 등록 안내가 없다 — 바꿀 수 없는 일을 권하지 않는다.
+  await expect(mp.getByTestId('account-hint')).toHaveCount(0);
+
+  // ── 10) CSV 내보내기(F7) — 파일이 장부와 같고, 새어선 안 되는 것이 없다 ───────
   /**
    * 이스케이프가 **아픈** 엔트리를 하나 심는다: 수식(`=1+1`) + 쉼표 + 큰따옴표 + 한글.
    * 이 세 가지가 한 셀에 같이 있을 때만 드러나는 실수가 있다 —
@@ -240,27 +285,25 @@ test('지출·회비가 잔액에 정확히 반영되고 정정으로 되돌아�
   /**
    * 유출 검사 — **공개 장부가 내보내지 않는 것은 CSV도 내보내지 않는다.**
    * CSV는 인증을 요구하지만, 파일이 되면 카톡방·메일로 재유통된다. 인증이 유통을 막지 못한다.
+   *
+   * 목록은 `e2e/helpers.ts`의 `groupForbiddenValues` 한 곳에서 온다 — 공개 장부 스펙과 **같은
+   * 원천**이다. Task 10에서 계좌 문구를 추가할 때 두 스펙에 흩어진 목록을 각각 고쳐야 했고,
+   * 한쪽만 고치면 규칙의 절반이 검사되지 않는다는 것이 드러나 헬퍼로 합쳤다.
+   * 공개 장부는 `publicToken`을 덜어내지만(주소창에 있다) **CSV는 하나도 덜어내지 않는다** —
+   * 파일 안에 있을 이유가 있는 값이 없다.
    */
-  await op.goto(`/groups/${groupId}/settings`);
-  const publicLink = (await op.getByTestId('public-link').innerText()).trim();
-  const publicToken = publicLink.split('/g/')[1];
-  const inviteToken = invite.split('/invite/')[1];
-
-  const users = (await sql`
-    select u.id, u.email from "user" u
-    join memberships m on m.user_id = u.id
-    where m.group_id = ${groupId}`) as { id: string; email: string }[];
-  expect(users, '멤버를 못 찾았다 — 검사 항목이 비어버린다').toHaveLength(2);
-
-  const forbidden: { label: string; value: string }[] = [
-    { label: 'groupId', value: groupId },
-    { label: 'inviteToken', value: inviteToken },
-    { label: 'publicToken', value: publicToken },
-    ...users.map((u) => ({ label: `이메일(${u.email})`, value: u.email })),
-    ...users.map((u) => ({ label: 'userId', value: u.id })),
-  ];
+  const forbidden = await groupForbiddenValues(groupId);
+  expect(
+    forbidden.map((f) => f.label),
+    '계좌 문구가 금칙 목록에 없다 — Task 10의 규칙 절반이 검사되지 않는다',
+  ).toContain('accountLabel(입금 계좌 문구)');
+  // 이 모임은 총무·멤버 둘뿐이다 — 이메일이 두 개가 아니면 픽스처가 어긋난 것이고,
+  // 그러면 "이메일이 파일에 없다"는 단언이 반쪽만 검사한다.
+  expect(
+    forbidden.filter((f) => f.label.startsWith('이메일')),
+    '이메일 금칙 값이 2개가 아니다 — 준비가 잘못됐다',
+  ).toHaveLength(2);
   for (const { label, value } of forbidden) {
-    expect(value, `금칙 값 ${label}이 비어 있다 — 준비가 잘못됐다`).toBeTruthy();
     expect(csv, `CSV에 ${label}이 들어 있다`).not.toContain(value);
   }
 

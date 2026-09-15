@@ -1,6 +1,13 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
-import { neon } from '@neondatabase/serverless';
-import { createGroup, exactAmount, newClientContext, signUp, testEmail } from './helpers';
+import {
+  createGroup,
+  exactAmount,
+  groupForbiddenValues,
+  newClientContext,
+  signUp,
+  testEmail,
+  type Forbidden,
+} from './helpers';
 
 /**
  * 공개 장부(F5) 유출 테스트 — **이 레포에서 가장 중요한 보안 테스트**.
@@ -23,14 +30,16 @@ import { createGroup, exactAmount, newClientContext, signUp, testEmail } from '.
  * ── `publicToken`은 금칙 목록에 **없다** ────────────────────────────────────
  * 토큰은 이미 주소창에 있고, Next가 라우트 파라미터를 부트스트랩·flight 페이로드에 싣는 것은
  * 정상 동작이다. 금지하면 보안은 하나도 늘지 않고 테스트만 깨진다(외부 리뷰 IMPORTANT 15).
+ * 그래서 이 스펙은 공용 목록(`groupForbiddenValues`)에서 그 한 항목만 덜어낸다.
  */
 
 const ORIGIN = 'http://localhost:3000';
 
-const sql = neon(process.env.DATABASE_URL!);
-
-/** 원시 응답 본문 어디에도 있어서는 안 되는 값들 — 이름은 실패 메시지에 그대로 나온다. */
-type Forbidden = { label: string; value: string };
+/**
+ * 입금 계좌 문구(Task 10) — **다른 어떤 픽스처도 만들 수 없는 값**으로 둔다.
+ * 원시 HTML에서 이 문자열이 하나라도 잡히면 출처를 따질 필요가 없다: 계좌가 샌 것이다.
+ */
+const ACCOUNT_LABEL = '누출탐지은행 0000-ACCT-LEAK-PUBLIC-7391 민지';
 
 const fx = {
   groupId: '',
@@ -137,11 +146,18 @@ test.describe('공개 장부 — 링크 하나로 열리되 그 밖의 것은 �
     await ownerPage.getByTestId('payment-toggle').click();
     await expect(ownerPage.getByTestId('round-total-collected')).toHaveText(/20,000/);
 
-    // ⚠️ 계좌 문구(accountLabel)는 **아직 없다** — Plan 03 Task 10이 미착수라 이 소재는 만들 수
-    // 없다. Task 10이 랜딩하면 그때 금칙 목록에 accountLabel 값을 추가해야 한다(플랜 Step 5-3).
+    // ── 입금 계좌를 설정한다 (Task 10) ────────────────────────────────────────
+    // 이 값이 저장돼 있어야 "공개 장부에 계좌가 없다"는 단언이 내용을 갖는다 —
+    // 설정하지 않으면 금칙 값이 비고, `groupForbiddenValues`가 그것을 깨서 알려준다.
+    await ownerPage.goto(`/groups/${fx.groupId}/settings`);
+    await ownerPage.getByTestId('account-label').fill(ACCOUNT_LABEL);
+    await ownerPage.getByTestId('account-save').click();
+    await expect(ownerPage.getByTestId('account-save')).toHaveText('저장됨');
+    // 새로 받아 온 화면에도 남아 있는지 — 저장이 진짜로 DB까지 갔다는 증거.
+    await ownerPage.reload();
+    await expect(ownerPage.getByTestId('account-label')).toHaveValue(ACCOUNT_LABEL);
 
     // ── 공개 링크를 설정 화면에서 복사 ─────────────────────────────────────────
-    await ownerPage.goto(`/groups/${fx.groupId}/settings`);
     const linkLocator = ownerPage.getByTestId('public-link');
     await expect(linkLocator).toContainText(`${ORIGIN}/g/`);
     fx.publicUrl = (await linkLocator.innerText()).trim();
@@ -149,30 +165,16 @@ test.describe('공개 장부 — 링크 하나로 열리되 그 밖의 것은 �
     // 128비트 base64url = 22자. 초대 토큰(12자)과 길이로도 구별된다.
     expect(fx.publicToken, '공개 토큰이 128비트가 아니다').toHaveLength(22);
 
-    // ── 금칙 목록을 DB에서 만든다 ─────────────────────────────────────────────
-    const [g] = (await sql`
-      select invite_token from groups where id = ${fx.groupId}`) as { invite_token: string }[];
-    fx.inviteToken = g.invite_token;
-
-    const users = (await sql`
-      select u.id, u.email from "user" u
-      join memberships m on m.user_id = u.id
-      where m.group_id = ${fx.groupId}`) as { id: string; email: string }[];
-    expect(users.length, '멤버를 못 찾았다').toBeGreaterThan(0);
-
-    const sessions = (await sql`
-      select s.token from session s
-      join memberships m on m.user_id = s.user_id
-      where m.group_id = ${fx.groupId}`) as { token: string }[];
-    expect(sessions.length, '세션 토큰을 못 찾았다 — 검사 항목이 비어버린다').toBeGreaterThan(0);
-
-    forbidden.push(
-      { label: 'inviteToken(초대 링크 토큰)', value: fx.inviteToken },
-      { label: 'groupId', value: fx.groupId },
-      ...users.map((u) => ({ label: `이메일(${u.email})`, value: u.email })),
-      ...users.map((u) => ({ label: `userId(auth user.id)`, value: u.id })),
-      ...sessions.map((s, i) => ({ label: `세션 토큰 #${i}`, value: s.token })),
-    );
+    // ── 금칙 목록 — 공용 목록에서 publicToken 하나만 덜어낸다 ─────────────────
+    // 덜어내는 이유는 파일 머리말의 마지막 단락과 같다(주소창에 있는 값이다). 나머지는 전부
+    // 검사한다 — 초대 토큰·groupId·이메일·userId·세션 토큰·**계좌 문구**.
+    const all = await groupForbiddenValues(fx.groupId);
+    forbidden.push(...all.filter((f) => f.value !== fx.publicToken));
+    expect(
+      forbidden.map((f) => f.label),
+      '계좌 문구가 금칙 목록에 없다 — Task 10의 규칙 절반이 검사되지 않는다',
+    ).toContain('accountLabel(입금 계좌 문구)');
+    fx.inviteToken = all.find((f) => f.label.startsWith('inviteToken'))!.value;
 
     anonCtx = await newClientContext(browser);
   });

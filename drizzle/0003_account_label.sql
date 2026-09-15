@@ -1,0 +1,1 @@
+ALTER TABLE "groups" ADD COLUMN "account_label" text;

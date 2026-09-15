@@ -17,7 +17,9 @@ import { groups, ledgerEntries, memberships } from './schema';
  *   - `memberships.id` / `memberships.userId` / `memberships.joinedAt`
  *   - `user.email`, `user.name` 등 인증 테이블 컬럼 일체 (조인 자체를 하지 않는다)
  *   - `ledgerEntries.createdBy` (userId다) / `ledgerEntries.groupId` / `ledgerEntries.createdAt`
- *   - `accountLabel` 등 회차 화면 전용 문구 (Task 10, 공개 장부 금지)
+ *   - `groups.accountLabel` — 총무의 입금 계좌 문구. 회차 화면의 미납 안내에만 나온다
+ *     (schema.ts의 3줄 규칙 ②). `e2e/public-ledger.spec.ts`의 금칙 목록이 원시 응답 본문과
+ *     flight 페이로드에서 이 값을 매 푸시마다 찾아본다 — 일부러 흘려 빨개지는 것을 확인했다.
  * 필드를 늘릴 때는 "이 값이 링크를 가진 모든 사람에게 보여도 되는가"를 먼저 답할 것.
  *
  * ⚠️ `group.id`는 함수 **내부**에서만 쓰고 반환하지 않는다 — 다른 라우트의 인가 판단에 쓰이는

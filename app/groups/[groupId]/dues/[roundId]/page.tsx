@@ -14,6 +14,7 @@ import { Amount } from '@/components/ui/amount';
 import { Cell, DataTable, Row } from '@/components/ui/data-table';
 import { GroupTabs } from '@/components/ui/group-tabs';
 import { PageHeader } from '@/components/ui/page-header';
+import { TextLink } from '@/components/ui/text-link';
 import PaymentToggle from './payment-toggle';
 import UnpaidNotice from './unpaid-notice';
 
@@ -59,9 +60,23 @@ export default async function RoundPage({
   // roundTotals 자체는 clamp하지 않는다(도메인 주석 참조) — 표기 판단은 이 화면 몫이다.
   const overpaid = outstanding < 0;
 
-  const notice = `${round.period} 회비(${formatAmount(round.amountPerPerson)}원) 미납: ${unpaid
-    .map((m) => m.displayName)
-    .join(', ')}`;
+  /**
+   * 미납 안내 문구 (F6 완결) — 단톡방에 그대로 붙는 두 줄이다.
+   *
+   *   2026-01 회비(20,000원) 미납: 철수, 영희
+   *   계좌: 카카오뱅크 3333-01-1234567 정현인
+   *
+   * 계좌가 없으면 **둘째 줄을 넣지 않는다** — 빈 `계좌:`는 없는 것보다 나쁘다.
+   * `accountLabel`은 `''`로 저장되지 않으므로(actions/group.ts) 여기서는 null 검사 하나로 끝난다.
+   * 이 문구는 인증된 회차 화면에만 있다 — 공개 장부·CSV에는 계좌가 나가지 않는다(schema.ts 3줄 규칙).
+   */
+  const accountLabel = found.group.accountLabel;
+  const notice = [
+    `${round.period} 회비(${formatAmount(round.amountPerPerson)}원) 미납: ${unpaid
+      .map((m) => m.displayName)
+      .join(', ')}`,
+    ...(accountLabel ? [`계좌: ${accountLabel}`] : []),
+  ].join('\n');
 
   return (
     <main className="mx-auto max-w-3xl px-5 pb-20">
@@ -170,13 +185,25 @@ export default async function RoundPage({
         </div>
       </details>
 
-      {/* F6의 핵심 — 총무의 마지막 동선은 단톡방 독촉이다. 계좌번호 칸은 없다(데이터 모델에 없는 값). */}
+      {/* F6의 핵심 — 총무의 마지막 동선은 단톡방 독촉이다. 계좌가 설정돼 있으면 문구에 함께 실린다. */}
       {unpaid.length > 0 ? (
         <section className="mt-7 border-2 border-ink p-4">
           <h2 className="font-display text-[11px] font-bold tracking-[0.14em] text-muted uppercase">
             미납 안내 문구
           </h2>
           <UnpaidNotice text={notice} />
+          {/* 계좌가 없으면 총무에게만 가는 길을 알려준다 — 멤버는 바꿀 수 없으므로 보여주지 않는다. */}
+          {!accountLabel && isOwner ? (
+            <p className="mt-3 text-[12px] leading-[1.7] text-muted" data-testid="account-hint">
+              <TextLink
+                className="font-bold text-ink underline"
+                href={`/groups/${groupId}/settings`}
+              >
+                설정에서 입금 계좌를 등록
+              </TextLink>
+              하면 이 문구에 계좌 줄이 함께 붙습니다.
+            </p>
+          ) : null}
         </section>
       ) : null}
     </main>

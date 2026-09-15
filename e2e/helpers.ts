@@ -1,4 +1,5 @@
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { neon } from '@neondatabase/serverless';
 
 /**
  * E2E 공용 절차. foundation.spec과 ledger.spec이 같은 가입·개설 동선을 쓰기 때문에
@@ -85,6 +86,67 @@ export async function createGroup(page: Page, name: string, displayName: string)
   const groupId = new URL(page.url()).pathname.split('/')[2];
   expect(groupId).toBeTruthy();
   return groupId;
+}
+
+/** 어떤 출력에도 있어서는 안 되는 값 한 개 — `label`은 실패 메시지에 그대로 실린다. */
+export type Forbidden = { label: string; value: string };
+
+/**
+ * 한 모임에 딸린 **새어나가면 안 되는 값 전부**를 DB에서 모아 온다 — 금칙 목록의 단일 원천.
+ *
+ * ── 왜 헬퍼인가 (Plan 03 Task 10에서 목록이 두 곳이 됐다) ────────────────────
+ * 이 목록을 쓰는 검사는 두 곳이다: `public-ledger.spec.ts`(공개 장부 원시 HTML·flight
+ * 페이로드)와 `ledger.spec.ts`(내보낸 CSV 본문). Task 9까지는 두 스펙이 같은 SQL을 각자
+ * 베껴 들고 있었고, Task 10의 `accountLabel`을 추가할 때 **한쪽만 고치면 규칙의 절반이
+ * 테스트 없이 남는다**는 것이 드러났다(플랜 Step 6의 수정 이력). 민감한 컬럼이 늘어날 때
+ * 고칠 곳을 한 곳으로 만드는 것이 이 함수의 존재 이유다.
+ *
+ * ── 각 스펙은 **자기 경로에 정당하게 있는 값만** 뺀다 ────────────────────────
+ * 여기서는 아무것도 빼지 않는다. 공개 장부는 `publicToken`을 뺀다(주소창에 이미 있다) —
+ * 그 판단은 스펙의 몫이고, 이유는 각 스펙에 적혀 있다. CSV는 하나도 빼지 않는다.
+ *
+ * ── 비어 있으면 **실패한다** ────────────────────────────────────────────────
+ * 값이 빈 금칙 항목은 `not.toContain('')`이 되어 항상 통과하는 헛된 단언이다. 특히
+ * `accountLabel`은 스펙이 설정 화면에서 **먼저 저장해 둬야** 한다 — 안 하면 이 검사는
+ * 아무것도 지키지 않으므로, 준비를 빠뜨린 것을 조용히 통과시키지 않고 여기서 깬다.
+ */
+export async function groupForbiddenValues(groupId: string): Promise<Forbidden[]> {
+  const sql = neon(process.env.DATABASE_URL!);
+
+  const [group] = (await sql`
+    select invite_token, public_token, account_label from groups where id = ${groupId}
+  `) as { invite_token: string; public_token: string; account_label: string | null }[];
+  expect(group, '모임을 못 찾았다 — 금칙 목록이 비어버린다').toBeTruthy();
+  expect(
+    group.account_label,
+    'account_label이 비어 있다 — 계좌를 저장한 뒤에 이 목록을 만들어야 검사가 성립한다',
+  ).toBeTruthy();
+
+  const users = (await sql`
+    select u.id, u.email from "user" u
+    join memberships m on m.user_id = u.id
+    where m.group_id = ${groupId}`) as { id: string; email: string }[];
+  expect(users.length, '멤버를 못 찾았다 — 검사 항목이 비어버린다').toBeGreaterThan(0);
+
+  const sessions = (await sql`
+    select s.token from session s
+    join memberships m on m.user_id = s.user_id
+    where m.group_id = ${groupId}`) as { token: string }[];
+  expect(sessions.length, '세션 토큰을 못 찾았다 — 검사 항목이 비어버린다').toBeGreaterThan(0);
+
+  const list: Forbidden[] = [
+    { label: 'groupId', value: groupId },
+    { label: 'inviteToken(초대 링크 토큰)', value: group.invite_token },
+    { label: 'publicToken(공개 장부 토큰)', value: group.public_token },
+    { label: 'accountLabel(입금 계좌 문구)', value: group.account_label! },
+    ...users.map((u) => ({ label: `이메일(${u.email})`, value: u.email })),
+    ...users.map((u) => ({ label: `userId(auth user.id) ${u.id}`, value: u.id })),
+    ...sessions.map((s, i) => ({ label: `세션 토큰 #${i}`, value: s.token })),
+  ];
+  for (const { label, value } of list) {
+    expect(value, `금칙 값 ${label}이 비어 있다 — 준비가 잘못됐다`).toBeTruthy();
+  }
+  return list;
 }
 
 /**

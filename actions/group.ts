@@ -55,3 +55,32 @@ export const regeneratePublicToken = groupActionClient
     revalidatePath(`/groups/${ctx.groupId}/settings`);
     return { publicToken: token };
   });
+
+/**
+ * 입금 계좌 표시 문구 저장 — 총무만 (F6). `groups.accountLabel`의 유일한 쓰기 경로다.
+ *
+ * ── 빈 문자열을 저장하지 않는 이유 ──────────────────────────────────────────
+ * 폼은 비운 칸을 `''`로 보낸다. 그것을 그대로 저장하면 "계좌가 없다"가 `null`과 `''` 두 값으로
+ * 갈라지고, 문구를 붙일지 말지 판단하는 곳마다 `!label`처럼 **둘 다** 걸러야 한다 —
+ * 한 군데만 `!== null`로 쓰면 빈 `계좌:` 줄이 단톡방으로 나간다. 그래서 경계에서 한 번 접는다.
+ * 공백만 입력한 경우도 같다(trim 후 빈 문자열) — `계좌:   `는 계좌가 아니다.
+ *
+ * `z.string().trim().max(60)`의 순서가 중요하다: trim이 먼저라 뒤에 공백을 붙여 60자 제한을
+ * 넘길 수 없다. 60자는 '은행명 + 계좌번호 + 예금주'에 넉넉하고, 단톡방에 붙는 한 줄이라
+ * 더 길어지면 문구가 읽히지 않는다.
+ */
+export const updateGroupAccount = groupActionClient
+  .inputSchema(z.object({
+    groupId: z.string(),
+    accountLabel: z.string().trim().max(60),
+  }))
+  .action(async ({ parsedInput, ctx }) => {
+    assertOwner(ctx.role);
+    const accountLabel = parsedInput.accountLabel === '' ? null : parsedInput.accountLabel;
+    await db.update(groups).set({ accountLabel }).where(eq(groups.id, ctx.groupId));
+    revalidatePath(`/groups/${ctx.groupId}/settings`);
+    // 계좌 문구는 **회차 화면의 안내 문구**에 실린다 — 회차 id를 모르므로 회비 하위 전체를 무효화한다.
+    // 'page'로는 `/dues`만 무효가 되어 이미 열려 있던 회차 화면이 옛 문구를 계속 보여준다.
+    revalidatePath(`/groups/${ctx.groupId}/dues`, 'layout');
+    return { accountLabel };
+  });

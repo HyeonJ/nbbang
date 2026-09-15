@@ -6,6 +6,7 @@ import { formatDateKst } from '@/lib/format';
 import { Cell, DataTable, Row } from '@/components/ui/data-table';
 import { GroupTabs } from '@/components/ui/group-tabs';
 import { PageHeader, RoleBadge } from '@/components/ui/page-header';
+import AccountPanel from './account-panel';
 import InviteLinkPanel from './invite-link-panel';
 import PublicLinkPanel from './public-link-panel';
 
@@ -48,6 +49,14 @@ export default async function GroupSettingsPage({ params }: { params: Promise<{ 
               </Row>
             ))}
           </DataTable>
+        </div>
+      </section>
+
+      <section className="pt-10">
+        <h2 className="font-display text-[12px] font-bold tracking-[0.14em] text-ink uppercase">입금 계좌</h2>
+        <div className="mt-4 border-t-2 border-ink pt-5">
+          {/* 토큰과 같은 이유로 **문구 하나만** 넘긴다 — group 행을 넘기면 inviteToken까지 직렬화된다. */}
+          <AccountPanel groupId={groupId} initialAccountLabel={group.accountLabel} />
         </div>
       </section>
 
