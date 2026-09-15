@@ -118,3 +118,5 @@ npm test           # Vitest 단위 테스트
 npm run build      # 프로덕션 빌드
 npm run e2e        # Playwright E2E (test 브랜치 DB를 TRUNCATE한다)
 ```
+
+<!-- 가드 증명 3: schema.ts도 drizzle/도 건드리지 않는 커밋 -->
