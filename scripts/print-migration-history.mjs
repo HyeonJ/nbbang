@@ -7,7 +7,11 @@
  * 프로덕션에 아무 변경도 적용되지 않았음을 로그에 남긴다.
  *
  * 실행: DATABASE_URL=... node scripts/print-migration-history.mjs
- * 자격증명은 찍지 않는다 (DB 이름과 호스트 앞 12자만).
+ *
+ * 대상 DB(db=/host=)는 일부러 찍지 않는다 — 이 스크립트는 **공개 CI 로그**에서 돌고,
+ * 어느 DB인지는 스텝에 걸린 시크릿 이름(PROD_DATABASE_URL)이 이미 말해준다.
+ * 사람이 직접 돌리며 대상 확인이 목적인 쪽은 scripts/mark-migration-applied.mts이고,
+ * 거기에는 대상 배너가 그대로 남아 있다.
  */
 import { neon } from '@neondatabase/serverless';
 
@@ -16,9 +20,6 @@ if (!url) {
   console.error('DATABASE_URL이 없습니다.');
   process.exit(1);
 }
-
-const target = new URL(url);
-console.log(`target db=${target.pathname.slice(1)} host=${target.hostname.slice(0, 12)}…`);
 
 const sql = neon(url);
 
