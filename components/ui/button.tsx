@@ -26,10 +26,24 @@ const SKINS = {
   },
 } as const;
 
-export function Button({ variant = 'solid', size = 'md', className = '', ...rest }: Props) {
-  const base =
-    'font-bold tracking-[0.04em] disabled:opacity-40 ' +
-    'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
+const BASE =
+  'font-bold tracking-[0.04em] disabled:opacity-40 ' +
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
+
+/**
+ * 같은 스킨을 `<button>`이 아닌 요소에 입힌다 — 다음 화면으로 **이동**하는 주 동작
+ * (정산 목록의 '정산 만들기')은 버튼이 아니라 링크여야 하고, 그렇다고 스킨 문자열을
+ * 화면 쪽에 손으로 베끼면 두 벌이 각자 낡는다. 한 벌만 두고 여기서 나눠 준다.
+ */
+export function buttonClasses(
+  variant: NonNullable<Props['variant']> = 'solid',
+  size: NonNullable<Props['size']> = 'md',
+  className = '',
+) {
   const skin = SKINS[variant];
-  return <button className={`${base} ${skin.base} ${skin[size]} ${className}`} {...rest} />;
+  return `${BASE} ${skin.base} ${skin[size]} ${className}`;
+}
+
+export function Button({ variant = 'solid', size = 'md', className = '', ...rest }: Props) {
+  return <button className={buttonClasses(variant, size, className)} {...rest} />;
 }

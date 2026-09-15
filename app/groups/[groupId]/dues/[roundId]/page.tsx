@@ -74,7 +74,7 @@ export default async function RoundPage({
               1인 금액
             </span>
             {/* 1인 금액은 회차의 조건이지 들어온 돈이 아니다 — 이 화면에서 오렌지는 '수납' 하나만 뜻한다. */}
-            <PlainAmount value={round.amountPerPerson} size="lg" />
+            <Amount value={round.amountPerPerson} size="lg" unit tone="plain" />
           </span>
         }
       />
@@ -83,14 +83,14 @@ export default async function RoundPage({
       <section className="mt-7 border-b-2 border-ink">
         <div className="grid grid-cols-3">
           <Stat label="예상" testId="round-total-expected">
-            <PlainAmount value={expected} />
+            <Amount value={expected} size="md" unit tone="plain" />
           </Stat>
           <Stat label="수납" testId="round-total-collected" divider>
             {/* 화면에서 오렌지가 갖는 의미는 하나 — '들어온 돈'. 예상·미납은 잉크로 둔다. */}
             <Amount value={collected} size="md" unit />
           </Stat>
           <Stat label="미납" testId="round-total-outstanding" divider>
-            <PlainAmount value={overpaid ? 0 : outstanding} />
+            <Amount value={overpaid ? 0 : outstanding} size="md" unit tone="plain" />
           </Stat>
         </div>
         {overpaid ? (
@@ -204,17 +204,5 @@ function Stat({
         {children}
       </div>
     </div>
-  );
-}
-
-/** 잉크 금액 — Amount는 양수를 '들어온 돈'(오렌지)으로 칠하므로 1인 금액·예상·미납에는 쓰지 않는다. */
-function PlainAmount({ value, size = 'md' }: { value: number; size?: 'md' | 'lg' }) {
-  const cls = size === 'lg' ? 'text-2xl' : 'text-[15px]';
-  const unitCls = size === 'lg' ? 'text-[15px]' : 'text-[12px]';
-  return (
-    <span className={`num ${cls}`}>
-      {formatAmount(value)}
-      <span className={`${unitCls} font-medium`}>원</span>
-    </span>
   );
 }

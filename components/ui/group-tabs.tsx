@@ -7,6 +7,8 @@ const TABS = [
   { href: '', label: '개요' },
   { href: '/dues', label: '회비' },
   { href: '/expenses', label: '지출' },
+  // 정산은 열람이 누구나이므로 필터 없이 전원에게 보인다 — 만들기 권한만 총무로 좁힌다(F4).
+  { href: '/settle', label: '정산' },
   { href: '/settings', label: '설정' },
 ] as const;
 
