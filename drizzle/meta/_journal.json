@@ -15,6 +15,13 @@
       "when": 1789447261522,
       "tag": "0001_composite_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789452874430,
+      "tag": "0002_settlement_tables",
+      "breakpoints": true
     }
   ]
 }

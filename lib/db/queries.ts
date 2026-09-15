@@ -1,7 +1,16 @@
 import { and, asc, count, desc, eq, or, sql, sum } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/lib/db';
-import { duesPayments, duesRounds, groups, ledgerEntries, memberships } from '@/lib/db/schema';
+import {
+  duesPayments,
+  duesRounds,
+  groups,
+  ledgerEntries,
+  memberships,
+  settlementParticipants,
+  settlementTransfers,
+  settlements,
+} from '@/lib/db/schema';
 
 /** 멤버십 확인을 포함한 모임 조회 — 비멤버면 null (페이지에서 notFound 처리). */
 export async function getGroupForMember(groupId: string, userId: string) {
@@ -143,4 +152,95 @@ export async function getRound(groupId: string, roundId: string) {
     .where(and(eq(duesRounds.id, roundId), eq(duesRounds.groupId, groupId)))
     .limit(1);
   return rows[0] ?? null;
+}
+
+export type SettlementListItem = Awaited<ReturnType<typeof getSettlements>>[number];
+
+/**
+ * 정산 목록 + 정산별 참여 인원. 한 번의 쿼리로 끝낸다(N+1 금지) —
+ * `getRoundsWithCounts`와 같은 모양이다: LEFT JOIN → GROUP BY PK → count(자식 PK).
+ * LEFT JOIN이라 참여자가 0인 정산(있을 수 없지만)도 행이 남고, count()는 NULL을 세지 않는다.
+ *
+ * ⚠️ `memberships`를 조인하지 않는다. 선결제자 이름이 필요하면 `settlement_participants`의
+ * `display_name_at_time`에서 가져온다 — 현재 명단을 조인하는 순간 과거 정산이 소급 변경된다(ADR-003).
+ */
+export async function getSettlements(groupId: string) {
+  return db
+    .select({
+      id: settlements.id,
+      title: settlements.title,
+      total: settlements.total,
+      occurredAt: settlements.occurredAt,
+      createdAt: settlements.createdAt,
+      payerMembershipId: settlements.payerMembershipId,
+      participantCount: count(settlementParticipants.id),
+    })
+    .from(settlements)
+    .leftJoin(settlementParticipants, eq(settlementParticipants.settlementId, settlements.id))
+    .where(eq(settlements.groupId, groupId))
+    .groupBy(settlements.id)
+    .orderBy(desc(settlements.occurredAt), desc(settlements.createdAt));
+}
+
+export type SettlementDetail = NonNullable<Awaited<ReturnType<typeof getSettlement>>>;
+
+/**
+ * 정산 상세 — 머리말 1행 + 참여자 **전원** + 이체 전원. 남의 모임 id는 null로 떨어진다.
+ *
+ * 세 테이블은 세 쿼리로 읽는다. 한 번의 조인으로 합치면 참여자 × 이체의 카티션 곱이 되어
+ * 행을 다시 갈라야 하고, 참여자만 있고 이체가 0건인 정산(1명 정산)에서 모양이 또 갈린다.
+ * 세 쿼리는 정산 하나당 고정 3회라 N+1이 아니다.
+ *
+ * ⚠️ 여기서도 `memberships` 조인은 없다 — 이름은 전부 `displayNameAtTime`이다(ADR-003 스냅샷).
+ * 이름이 바뀌거나 멤버가 떠나도 이 화면은 변하지 않아야 한다.
+ */
+export async function getSettlement(groupId: string, settlementId: string) {
+  const [settlement] = await db
+    .select({
+      id: settlements.id,
+      title: settlements.title,
+      total: settlements.total,
+      payerMembershipId: settlements.payerMembershipId,
+      occurredAt: settlements.occurredAt,
+      createdAt: settlements.createdAt,
+    })
+    .from(settlements)
+    .where(and(eq(settlements.id, settlementId), eq(settlements.groupId, groupId)))
+    .limit(1);
+  if (!settlement) return null;
+
+  const participants = await db
+    .select({
+      membershipId: settlementParticipants.membershipId,
+      displayNameAtTime: settlementParticipants.displayNameAtTime,
+      shareAmount: settlementParticipants.shareAmount,
+      isPayer: settlementParticipants.isPayer,
+    })
+    .from(settlementParticipants)
+    .where(
+      and(
+        eq(settlementParticipants.settlementId, settlementId),
+        eq(settlementParticipants.groupId, groupId),
+      ),
+    )
+    // 선결제자를 맨 위로, 그 다음은 이름순 — 같은 정산을 두 사람이 봐도 같은 순서로 읽힌다.
+    .orderBy(desc(settlementParticipants.isPayer), asc(settlementParticipants.displayNameAtTime));
+
+  const transfers = await db
+    .select({
+      id: settlementTransfers.id,
+      fromMembershipId: settlementTransfers.fromMembershipId,
+      toMembershipId: settlementTransfers.toMembershipId,
+      amount: settlementTransfers.amount,
+    })
+    .from(settlementTransfers)
+    .where(
+      and(
+        eq(settlementTransfers.settlementId, settlementId),
+        eq(settlementTransfers.groupId, groupId),
+      ),
+    )
+    .orderBy(desc(settlementTransfers.amount), asc(settlementTransfers.fromMembershipId));
+
+  return { settlement, participants, transfers };
 }

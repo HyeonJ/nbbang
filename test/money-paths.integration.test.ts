@@ -97,6 +97,9 @@ describe('테스트 정리 목록', () => {
       'ledger_entries',
       'memberships',
       'session',
+      'settlement_participants',
+      'settlement_transfers',
+      'settlements',
       'user',
       'verification',
     ]);

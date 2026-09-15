@@ -1,4 +1,13 @@
-import { foreignKey, integer, pgTable, text, timestamp, unique, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  foreignKey,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import { user } from './auth-schema';
 
 export * from './auth-schema';
@@ -99,5 +108,97 @@ export const duesPayments = pgTable('dues_payments', {
     columns: [t.groupId, t.ledgerEntryId],
     foreignColumns: [ledgerEntries.groupId, ledgerEntries.id],
     name: 'dues_payments_entry_fk',
+  }),
+]);
+
+/**
+ * 이벤트 정산 한 건(회식비 엔빵 등). **원장을 건드리지 않는다** — 모임 돈이 아니라
+ * 멤버 사이의 채무 정리이므로 잔액에 영향이 없다(ADR-003).
+ *
+ * v1은 **선결제자 1명** 모델이다: 한 사람이 총액을 먼저 내고 나머지가 그에게 보낸다.
+ * 이 행은 머리말(제목·총액·선결제자·일자)만 들고, 계산 결과는 아래 두 테이블에 **전부** 적재된다.
+ */
+export const settlements = pgTable('settlements', {
+  id: text('id').primaryKey(),
+  groupId: text('group_id').notNull().references(() => groups.id),
+  title: text('title').notNull(),
+  total: integer('total').notNull(),
+  // 선결제자 — 참여자 중 한 명. 모임 경계는 아래 복합 FK가 고정한다.
+  payerMembershipId: text('payer_membership_id').notNull(),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  createdBy: text('created_by').notNull().references(() => user.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  // 복합 FK 참조 대상 — 아래 참여자·이체가 (group_id, settlement_id)로 이 행을 가리킨다.
+  unique('settlements_group_id_key').on(t.groupId, t.id),
+  foreignKey({
+    columns: [t.groupId, t.payerMembershipId],
+    foreignColumns: [memberships.groupId, memberships.id],
+    name: 'settlements_payer_fk',
+  }),
+]);
+
+/**
+ * 정산 참여자 스냅샷 — 참여자 **전원**이 한 행씩 남는다(선결제자도, 부담액 0원도).
+ *
+ * ⚠️ 이 테이블은 초안에 없었다. 초안은 이체 행만 저장하면서 "스냅샷"이라 주장했는데
+ * 그러면 ① 선결제자의 부담액 ② 0원 참여자 ③ 이체가 0건인 정산의 참여 인원
+ * ④ 그 시점의 표시 이름이 전부 유실된다. 외부 리뷰(2026-09-15)가 BLOCKER로 지적해 분리했다.
+ *
+ * `displayNameAtTime`이 핵심이다 — 조회 시 `memberships`를 조인하면 누가 이름을 바꾸거나
+ * 모임을 떠나는 순간 **과거 정산이 소급 변경된다**. 기록이 아니라 뷰가 되어버린다(ADR-003).
+ */
+export const settlementParticipants = pgTable('settlement_participants', {
+  id: text('id').primaryKey(),
+  groupId: text('group_id').notNull(),
+  settlementId: text('settlement_id').notNull(),
+  membershipId: text('membership_id').notNull(),
+  // 정산 시점의 표시 이름을 그대로 굳힌다 — 이후 명단이 어떻게 바뀌어도 이 값은 변하지 않는다.
+  displayNameAtTime: text('display_name_at_time').notNull(),
+  shareAmount: integer('share_amount').notNull(),
+  isPayer: boolean('is_payer').notNull(),
+}, (t) => [
+  // 같은 사람이 한 정산에 두 번 들어오면 부담액이 두 줄로 갈라진다 — 마지막 방어선.
+  // (경계에서는 createSettlement의 zod refine이, 도메인에서는 DUPLICATE_PARTICIPANT가 먼저 막는다.)
+  uniqueIndex('settlement_participants_unique').on(t.settlementId, t.membershipId),
+  foreignKey({
+    columns: [t.groupId, t.settlementId],
+    foreignColumns: [settlements.groupId, settlements.id],
+    name: 'settlement_participants_settlement_fk',
+  }),
+  foreignKey({
+    columns: [t.groupId, t.membershipId],
+    foreignColumns: [memberships.groupId, memberships.id],
+    name: 'settlement_participants_membership_fk',
+  }),
+]);
+
+/**
+ * 이체 목록 — "누가 누구에게 얼마". 선결제자가 채권자 한 명뿐이므로 최대 n−1행이다(ADR-003).
+ * `from`·`to` **양쪽 모두** 복합 FK로 같은 모임임을 DB가 보장한다 — 초안은 `to` 쪽에 FK가
+ * 없어 직접 insert로 타 모임·존재하지 않는 멤버십을 받을 수 있었다(외부 리뷰 IMPORTANT 5).
+ */
+export const settlementTransfers = pgTable('settlement_transfers', {
+  id: text('id').primaryKey(),
+  groupId: text('group_id').notNull(),
+  settlementId: text('settlement_id').notNull(),
+  fromMembershipId: text('from_membership_id').notNull(),
+  toMembershipId: text('to_membership_id').notNull(),
+  amount: integer('amount').notNull(),
+}, (t) => [
+  foreignKey({
+    columns: [t.groupId, t.settlementId],
+    foreignColumns: [settlements.groupId, settlements.id],
+    name: 'settlement_transfers_settlement_fk',
+  }),
+  foreignKey({
+    columns: [t.groupId, t.fromMembershipId],
+    foreignColumns: [memberships.groupId, memberships.id],
+    name: 'settlement_transfers_from_fk',
+  }),
+  foreignKey({
+    columns: [t.groupId, t.toMembershipId],
+    foreignColumns: [memberships.groupId, memberships.id],
+    name: 'settlement_transfers_to_fk',
   }),
 ]);
