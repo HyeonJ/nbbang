@@ -115,6 +115,7 @@ rm .env.production.local
 
 - **돈은 불변 원장**: 모든 금액 변동은 append-only 이벤트. 수정은 역분개. 잔액은 파생값. ([ADR-001](docs/adr/001-immutable-ledger.md))
 - **모든 쓰기는 검증·인가를 통과**: 서버 액션은 공개 엔드포인트다. ([ADR-002](docs/adr/002-server-action-authorization.md))
+- **정산은 원장 밖**: 멤버 간 채무는 모임 돈이 아니다. 결과는 그 시점 이름까지 굳힌 스냅샷으로 남는다. ([ADR-003](docs/adr/003-settlement-outside-ledger.md))
 - **문서가 단일 진실 원천**: [requirements](docs/requirements.md) → [설계 스펙](docs/superpowers/specs/2026-09-11-nbbang-design.md) → 구현 계획 순으로 진화.
 
 ## 개발
