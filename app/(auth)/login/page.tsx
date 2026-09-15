@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { authClient } from '@/lib/auth-client';
+import { authErrorMessage } from '@/lib/auth-errors';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { PageHeader } from '@/components/ui/page-header';
@@ -33,11 +34,7 @@ function LoginForm() {
         ? await authClient.signUp.email({ name, email, password })
         : await authClient.signIn.email({ email, password });
       if (result.error) {
-        setError(
-          isSignup
-            ? '가입에 실패했습니다. 입력 내용을 확인해 주세요.'
-            : '이메일 또는 비밀번호가 올바르지 않습니다.',
-        );
+        setError(authErrorMessage({ status: result.error.status, isSignup }));
         return;
       }
       router.push(next);

@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { createGroup, exactAmount, signUp, testEmail } from './helpers';
+import { createGroup, exactAmount, newClientContext, signUp, testEmail } from './helpers';
 
 test('가입→모임 생성→초대 합류→설정 권한', async ({ browser }) => {
   test.setTimeout(120_000);
 
   // 1) 총무 가입
-  const ownerContext = await browser.newContext();
+  const ownerContext = await newClientContext(browser);
   const op = await ownerContext.newPage();
   await op.goto('/login');
   await signUp(op, { name: '민지', email: testEmail('foundation', 'owner') });
@@ -27,7 +27,7 @@ test('가입→모임 생성→초대 합류→설정 권한', async ({ browser 
   await expect(op.getByTestId('member-row')).toHaveCount(1);
 
   // 4) 멤버 — 초대 링크 → 로그인 유도 → 가입 → 합류
-  const memberContext = await browser.newContext();
+  const memberContext = await newClientContext(browser);
   const mp = await memberContext.newPage();
   await mp.goto(invite);
   await mp.getByTestId('join-login-link').click();

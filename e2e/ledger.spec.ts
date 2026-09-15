@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createGroup, exactAmount, signUp, testEmail } from './helpers';
+import { createGroup, exactAmount, newClientContext, signUp, testEmail } from './helpers';
 
 /**
  * 원장 정합성 E2E — 이 스펙의 존재 이유는 "화면이 원장과 어긋나지 않음"을 고정하는 것이다.
@@ -16,7 +16,7 @@ async function expectBalance(page: Page, groupId: string, amount: string) {
 test('지출·회비가 잔액에 정확히 반영되고 정정으로 되돌아온다', async ({ browser }) => {
   test.setTimeout(180_000);
 
-  const ownerContext = await browser.newContext();
+  const ownerContext = await newClientContext(browser);
   const op = await ownerContext.newPage();
   // 정정·납부 취소는 window.confirm으로 확인받는다 — 핸들러가 없으면 Playwright가 자동 dismiss해
   // 쓰기가 아예 일어나지 않는다. 항상 수락해 "확인한 사용자"를 연기한다.
@@ -125,7 +125,7 @@ test('지출·회비가 잔액에 정확히 반영되고 정정으로 되돌아�
   await expect(inviteLocator).toContainText('http://localhost:3000/invite/');
   const invite = (await inviteLocator.innerText()).trim();
 
-  const memberContext = await browser.newContext();
+  const memberContext = await newClientContext(browser);
   const mp = await memberContext.newPage();
   await mp.goto(invite);
   await mp.getByTestId('join-login-link').click();

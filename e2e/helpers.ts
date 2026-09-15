@@ -1,9 +1,36 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 /**
  * E2E 공용 절차. foundation.spec과 ledger.spec이 같은 가입·개설 동선을 쓰기 때문에
  * 셀렉터가 두 파일에 흩어지지 않도록 여기 한 곳에만 둔다.
  */
+
+/** 워커마다 IP 대역을 갈라 쓴다 — 스펙은 각자의 프로세스에서 돌아 모듈 카운터를 공유하지 않는다. */
+const WORKER_INDEX = Number(process.env.TEST_PARALLEL_INDEX ?? 0);
+let contextSeq = 0;
+
+/**
+ * 브라우저 컨텍스트 = 서로 다른 사람. 컨텍스트마다 다른 클라이언트 IP를 실어 보낸다.
+ *
+ * `browser.newContext()`를 그냥 쓰면 안 되는 이유: better-auth는 `/sign-in*`·`/sign-up*`에
+ * **IP당 10초 3회** 제한을 기본으로 걸고(rate-limiter의 default special rule), 프로덕션 빌드에선
+ * 클라이언트 IP를 `x-forwarded-for`에서만 찾는다. `next start`는 앞에 프록시가 없어 그 헤더가
+ * 없으니 IP 해석이 실패하고, 그러면 제한 키가 `no-trusted-ip|/sign-up/email` **하나로 뭉쳐
+ * 서버 전체가 버킷을 공유**한다. 두 스펙의 가입 4건이 10초 안에 들어오는 CI에선 4번째가 429로
+ * 죽었다(로컬은 느려서 창을 넘기고 통과 — 그래서 CI에서만 터졌다).
+ *
+ * 실제 배포(Vercel)는 프록시가 `x-forwarded-for`를 채워 사용자별로 버킷이 갈린다. 그래서 여기서
+ * 헤더를 넣는 건 제한을 끄는 우회가 아니라 **테스트를 실제 배포 형태에 맞추는 것**이다 —
+ * 레이트리밋은 켜진 채로 남는다.
+ *
+ * 주소는 TEST-NET-1(192.0.2.0/24) — 문서용 예약 대역이라 실주소와 겹치지 않는다.
+ */
+export function newClientContext(browser: Browser): Promise<BrowserContext> {
+  contextSeq += 1;
+  return browser.newContext({
+    extraHTTPHeaders: { 'x-forwarded-for': `192.0.2.${WORKER_INDEX * 16 + contextSeq}` },
+  });
+}
 
 /**
  * 스펙·역할마다 겹치지 않는 테스트 이메일.
