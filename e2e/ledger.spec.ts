@@ -1,5 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
+import { neon } from '@neondatabase/serverless';
 import { createGroup, exactAmount, INVITE_JOIN_URL, newClientContext, signUp, testEmail } from './helpers';
+
+// global-setup이 센티널·dev DB 가드를 통과시킨 테스트 브랜치. 여기서는 **읽기만** 한다.
+const sql = neon(process.env.DATABASE_URL!);
 
 /**
  * 원장 정합성 E2E — 이 스펙의 존재 이유는 "화면이 원장과 어긋나지 않음"을 고정하는 것이다.
@@ -23,8 +27,12 @@ test('지출·회비가 잔액에 정확히 반영되고 정정으로 되돌아�
   op.on('dialog', (d) => d.accept());
 
   // ── 1) 총무 가입 + 모임 생성 → 빈 원장의 잔액은 0 ────────────────────────────
+  // 이메일은 뒤의 CSV 유출 검사에서 금칙 값으로 다시 쓴다.
+  const ownerEmail = testEmail('ledger', 'owner');
+  const memberEmail = testEmail('ledger', 'member');
+
   await op.goto('/login');
-  await signUp(op, { name: '민지', email: testEmail('ledger', 'owner') });
+  await signUp(op, { name: '민지', email: ownerEmail });
   await expect(op).toHaveURL(/\/groups$/);
   const groupId = await createGroup(op, '정산모임', '민지');
   await expect(op.getByTestId('group-title')).toHaveText('정산모임');
@@ -129,7 +137,7 @@ test('지출·회비가 잔액에 정확히 반영되고 정정으로 되돌아�
   const mp = await memberContext.newPage();
   await mp.goto(invite);
   await mp.getByTestId('join-login-link').click();
-  await signUp(mp, { name: '철수', email: testEmail('ledger', 'member') });
+  await signUp(mp, { name: '철수', email: memberEmail });
   await expect(mp).toHaveURL(INVITE_JOIN_URL);
   await mp.getByTestId('join-display-name').fill('철수');
   await mp.getByTestId('join-submit').click();
@@ -158,6 +166,114 @@ test('지출·회비가 잔액에 정확히 반영되고 정정으로 되돌아�
   await expect(mp.getByTestId('round-total-outstanding')).toHaveText(exactAmount('20,000'));
   await expect(mp.getByTestId('payment-row')).toHaveCount(2);
   await expect(mp.getByTestId('payment-toggle')).toHaveCount(0);
+
+  // ── 9) CSV 내보내기(F7) — 파일이 장부와 같고, 새어선 안 되는 것이 없다 ────────
+  /**
+   * 이스케이프가 **아픈** 엔트리를 하나 심는다: 수식(`=1+1`) + 쉼표 + 큰따옴표 + 한글.
+   * 이 세 가지가 한 셀에 같이 있을 때만 드러나는 실수가 있다 —
+   * 접두사를 인용 밖에 붙이거나, 따옴표를 이중화하지 않거나, 인용을 잊는 것.
+   */
+  await op.goto(`/groups/${groupId}/expenses`);
+  await op.getByTestId('expense-amount-input').fill('1500');
+  await op.getByTestId('expense-date').fill('2026-02-03');
+  await op.getByTestId('expense-category').fill('비품');
+  await op.getByTestId('expense-memo').fill('=1+1, "큰따옴표" 포함');
+  await op.getByTestId('expense-submit').click();
+  await expect(op.getByTestId('expense-row')).toHaveCount(2);
+
+  const exportUrl = `/api/groups/${groupId}/export`;
+  const res = await ownerContext.request.get(exportUrl);
+  expect(res.status(), 'CSV를 받지 못했다').toBe(200);
+  expect(res.headers()['content-type']).toBe('text/csv; charset=utf-8');
+  expect(res.headers()['cache-control'], '모임 재무 파일이 캐시될 수 있다').toContain('no-store');
+
+  const disposition = res.headers()['content-disposition'];
+  expect(disposition, '다운로드가 아니라 브라우저에 그려진다').toContain('attachment;');
+  // 한글 모임 이름은 RFC 5987 `filename*`로 실린다(헤더 값은 ASCII만 허용된다).
+  expect(disposition).toContain(`filename*=UTF-8''nbbang-${encodeURIComponent('정산모임')}-`);
+  // ASCII 폴백은 이름 없이 날짜만 — filename*을 모르는 옛 클라이언트도 파일을 저장할 수 있다.
+  expect(disposition).toMatch(/filename="nbbang-ledger-\d{4}-\d{2}-\d{2}\.csv"/);
+  expect(disposition, '헤더 값에 비ASCII가 섞였다').toMatch(/^[\x20-\x7e]*$/);
+
+  /**
+   * BOM을 **바이트로** 확인한다. BOM이 없으면 Windows Excel이 UTF-8을 cp949로 읽어
+   * 한글이 전부 깨진다 — 이 기능에서 현실적으로 가장 흔한 실패다.
+   */
+  const rawBody = await res.body();
+  expect([...rawBody.subarray(0, 3)], 'UTF-8 BOM(EF BB BF)이 없다').toEqual([0xef, 0xbb, 0xbf]);
+
+  const csv = rawBody.toString('utf8').slice(1); // BOM 한 글자만 떼어낸다
+  const lines = csv.split('\r\n');
+  expect(lines[0], '헤더 행이 다르다').toBe('일자,종류,금액,분류,메모,정정대상');
+  // 원장 6줄(지출 2 + 회비 3 + 지출 정정 1) — 화면은 정정을 접지만 파일은 전부 내보낸다.
+  expect(lines).toHaveLength(7);
+
+  const lineStartingWith = (prefix: string) => {
+    const found = lines.filter((l) => l.startsWith(prefix));
+    expect(found, `${prefix}로 시작하는 행이 하나가 아니다`).toHaveLength(1);
+    return found[0];
+  };
+
+  /**
+   * 음수 금액이 `-96000`(ASCII 하이픈, 접두사 없음)으로 나가야 스프레드시트가 **숫자로** 읽는다.
+   * 여기서 `'-96000`이 되면 모든 지출이 텍스트가 되어 합계가 불가능해지고,
+   * 화면 표기인 U+2212(−)가 섞이면 같은 결과가 된다.
+   */
+  expect(lineStartingWith('2026-01-15')).toBe('2026-01-15,지출,-96000,대관료,코트 대관,');
+  expect(csv, "음수에 수식 방어 접두사가 붙었다 — 숫자로 읽히지 않는다").not.toContain("'-96000");
+  expect(csv, '표시용 U+2212가 파일에 섞였다 — 스프레드시트가 숫자로 읽지 못한다').not.toContain('−');
+
+  /**
+   * 수식 + 쉼표 + 따옴표 + 한글이 한 셀에: 접두사 `'`는 인용 **안**에, `"`는 이중화,
+   * 셀 전체는 인용. 한 글자라도 어긋나면 열이 밀려 파일이 쓸모없어진다.
+   */
+  expect(lineStartingWith('2026-02-03')).toBe(
+    '2026-02-03,지출,-1500,비품,"\'=1+1, ""큰따옴표"" 포함",',
+  );
+
+  // 정정 행은 대상을 **사람이 읽을 수 있게** 가리킨다(uuid가 아니라 날짜 + 메모).
+  expect(csv, '정정 행이 대상을 가리키지 않는다').toContain(',정정,96000,,정정: ');
+  expect(csv).toContain('2026-01-15 코트 대관');
+  // 회비 납부·취소도 한 줄씩 남는다(ADR-001 — 지우지 않는다).
+  expect(csv.match(/,회비 납부,20000,회비,/g), '회비 납부가 두 줄이 아니다').toHaveLength(2);
+
+  /**
+   * 유출 검사 — **공개 장부가 내보내지 않는 것은 CSV도 내보내지 않는다.**
+   * CSV는 인증을 요구하지만, 파일이 되면 카톡방·메일로 재유통된다. 인증이 유통을 막지 못한다.
+   */
+  await op.goto(`/groups/${groupId}/settings`);
+  const publicLink = (await op.getByTestId('public-link').innerText()).trim();
+  const publicToken = publicLink.split('/g/')[1];
+  const inviteToken = invite.split('/invite/')[1];
+
+  const users = (await sql`
+    select u.id, u.email from "user" u
+    join memberships m on m.user_id = u.id
+    where m.group_id = ${groupId}`) as { id: string; email: string }[];
+  expect(users, '멤버를 못 찾았다 — 검사 항목이 비어버린다').toHaveLength(2);
+
+  const forbidden: { label: string; value: string }[] = [
+    { label: 'groupId', value: groupId },
+    { label: 'inviteToken', value: inviteToken },
+    { label: 'publicToken', value: publicToken },
+    ...users.map((u) => ({ label: `이메일(${u.email})`, value: u.email })),
+    ...users.map((u) => ({ label: 'userId', value: u.id })),
+  ];
+  for (const { label, value } of forbidden) {
+    expect(value, `금칙 값 ${label}이 비어 있다 — 준비가 잘못됐다`).toBeTruthy();
+    expect(csv, `CSV에 ${label}이 들어 있다`).not.toContain(value);
+  }
+
+  /**
+   * 버튼이 실제로 다운로드를 시작하는지 — **멤버** 화면에서 확인한다.
+   * 라우트가 멤버를 통과시켜도 버튼이 총무 전용 화면에만 있으면 멤버는 닿을 수 없다.
+   */
+  await mp.goto(`/groups/${groupId}`);
+  const download = mp.waitForEvent('download');
+  await mp.getByTestId('export-csv').click();
+  const file = await download;
+  // 브라우저가 Content-Disposition의 이름을 그대로 쓴다 — 한글 이름이 filename*로 살아 있는 증거.
+  expect(file.suggestedFilename()).toMatch(/^nbbang-정산모임-\d{4}-\d{2}-\d{2}\.csv$/);
 
   await ownerContext.close();
   await memberContext.close();

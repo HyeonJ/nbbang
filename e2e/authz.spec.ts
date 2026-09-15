@@ -364,6 +364,52 @@ test.describe('인가 매트릭스', () => {
     }
   });
 
+  /**
+   * CSV 내보내기 라우트 — **이 매트릭스에 속한다.**
+   *
+   * 이 레포의 다른 모든 인가는 `groupActionClient`(세션 → 멤버십 → 역할) 하나를 지난다.
+   * 그런데 파일 다운로드는 서버 액션으로 할 수 없어(액션 응답은 파일이 아니다) F7은 라우트
+   * 핸들러가 됐고, **라우트 핸들러는 그 미들웨어를 지나지 않는다**. 즉 이 경로의 인가는
+   * `app/api/groups/[groupId]/export/route.ts`에 손으로 쓴 네 줄이 전부다 —
+   * 이 레포에서 인가 코드가 중복된 유일한 자리이고, 그래서 회귀 위험도 여기에만 있다.
+   *
+   * 역할 다섯 개가 이미 갖춰진 이 스펙이 그 확인의 제자리다. 읽기 경로라 쓰기 계수는 보지
+   * 않지만, 묻는 것은 같다: **누가 이 모임의 데이터에 닿는가.**
+   */
+  test('CSV 내보내기는 멤버 이상만 통과한다 — 액션 미들웨어를 지나지 않는 경로', async () => {
+    const url = (gid: string) => `${ORIGIN}/api/groups/${gid}/export`;
+
+    // 총무와 멤버는 둘 다 받는다. 장부 열람 권한이 있으면 파일로도 받을 수 있다(F7).
+    const ownerRes = await ownerCtx.request.get(url(fx.gidA));
+    expect(ownerRes.status(), '총무가 CSV를 받지 못했다').toBe(200);
+    expect(ownerRes.headers()['content-type']).toContain('text/csv');
+    expect(ownerRes.headers()['content-disposition']).toContain('attachment');
+
+    const memberRes = await memberCtx.request.get(url(fx.gidA));
+    expect(memberRes.status(), '멤버가 CSV를 받지 못했다').toBe(200);
+    // 역할에 따라 내용이 갈리지 않는다 — 같은 원장, 같은 파일.
+    expect(await memberRes.text(), '멤버와 총무의 파일이 다르다').toBe(await ownerRes.text());
+
+    // 거부 3역할. 비멤버는 **404**다 — 401은 "그 모임은 있다"를 알려준다.
+    const denied = [
+      ['비멤버', outsiderCtx, 404],
+      ['미인증', anonCtx, 401],
+      // 공개 링크는 **읽기 전용 베어러**다. 장부 화면을 읽을 수 있어도 원본 반출로 승격되지 않는다.
+      ['공개 링크 방문자', publicVisitorCtx, 401],
+    ] as const;
+    for (const [label, ctx, status] of denied) {
+      const res = await ctx.request.get(url(fx.gidA));
+      expect(res.status(), `${label}: 기대 ${status}`).toBe(status);
+      expect(await res.text(), `${label}: 거부 응답에 장부가 실려 있다`).not.toContain('인가모임');
+    }
+
+    // 총무여도 모임 경계를 넘지 못한다 — 남의 모임 id는 "없음"이다.
+    const cross = await ownerCtx.request.get(url(fx.gidB));
+    expect(cross.status(), '총무가 남의 모임 CSV를 받았다').toBe(404);
+    // 존재하지 않는 id도 같은 404 — 모임의 존재 여부가 상태 코드로 새지 않는다.
+    expect((await ownerCtx.request.get(url(crypto.randomUUID()))).status()).toBe(404);
+  });
+
   test('총무여도 모임 경계를 넘을 수 없다 — 타 모임 id는 "없음"으로 떨어진다', async () => {
     const baseline = await writeCounts();
     // 남의 모임 엔트리는 모임 스코프 조회에 애초에 들어오지 않는다 → 존재 여부가 새지 않는다.

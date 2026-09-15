@@ -57,7 +57,25 @@ export default async function GroupDashboardPage({ params }: { params: Promise<{
       </section>
 
       <section className="pt-7">
-        <h2 className="font-display text-[11px] font-bold tracking-[0.14em] text-muted uppercase">최근 기록</h2>
+        <div className="flex items-baseline justify-between">
+          <h2 className="font-display text-[11px] font-bold tracking-[0.14em] text-muted uppercase">최근 기록</h2>
+          {/*
+            CSV 내보내기(F7) — 총무·멤버 **모두**. 열람 권한이 있으면 파일로도 받을 수 있다.
+            개요 화면에 두는 이유: 이 화면이 원장을 보여주는 곳이고(아래 표), 설정 탭은
+            총무 전용이라 거기 두면 멤버가 닿지 못한다(플랜은 설정 화면을 지목했지만
+            그 화면은 `role !== 'owner'`를 404로 떨어뜨린다 — 같은 태스크의 두 문장이 어긋났다).
+
+            `next/link`가 아니라 평범한 `<a>`다: 이것은 화면 이동이 아니라 **파일 다운로드**다.
+            Link는 RSC 프리페치·클라이언트 내비게이션을 걸어 attachment 응답과 맞지 않는다.
+          */}
+          <a
+            href={`/api/groups/${groupId}/export`}
+            data-testid="export-csv"
+            className="font-display text-[11px] font-bold tracking-[0.1em] text-muted uppercase underline decoration-hairline decoration-2 underline-offset-4 hover:text-accent-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            CSV 내보내기
+          </a>
+        </div>
         <div className="mt-4">
           <DataTable>
             {recent.length === 0 ? (

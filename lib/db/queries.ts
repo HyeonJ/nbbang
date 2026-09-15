@@ -97,6 +97,45 @@ export async function getExpenseEntries(groupId: string) {
     .orderBy(desc(ledgerEntries.occurredAt), desc(ledgerEntries.createdAt));
 }
 
+export type LedgerExportRow = Awaited<ReturnType<typeof getAllEntries>>[number];
+
+/**
+ * CSV 내보내기(F7)가 쓰는 원장 **전부** — limit 없이, **발생일 오름차순**.
+ *
+ * 화면(`getRecentEntries`·`getExpenseEntries`)은 내림차순이다. 여기서만 오름차순인 이유:
+ * 화면은 "방금 뭘 했지"를 보는 곳이고 파일은 **시간순으로 읽는 장부**다. 스프레드시트에서
+ * 누적 잔액 열을 하나 만들면 위에서 아래로 더해지는 순서여야 한다.
+ *
+ * ⚠️ 컬럼을 **하나하나 적어 고른다** — `lib/db/public-queries.ts`와 같은 이유이고, 여기서는
+ * 그 이유가 한 단계 더 직접적이다: 이 select의 결과가 그대로 **파일의 셀**이 된다.
+ * `select()`를 인자 없이 쓰면 `created_by`(userId)와 `group_id`가 CSV에 실려 나간다.
+ * 공개 장부가 내보내지 않는 것은 CSV도 내보내지 않는다 — 인증을 요구한다고 해서
+ * 원장 파일이 계정 식별자를 나를 이유가 되지는 않는다(그 파일은 카톡방으로 흘러간다).
+ *
+ * `reversalTargetLabel`은 정정 대상을 **사람이 읽을 수 있게** 만든 것이다. `reversal_of`를
+ * 그대로 내보내면 CSV 안에 그 id를 가진 행이 없어 가리키는 곳이 없는 참조가 된다
+ * (플랜의 `정정대상` 열은 이 문제를 보지 못했다). 자기 조인 한 번으로 대상의 발생일과
+ * 메모를 함께 읽어 `2026-01-15 코트 대관` 형태로 만든다.
+ */
+export async function getAllEntries(groupId: string) {
+  const target = alias(ledgerEntries, 'reversal_target');
+  return db
+    .select({
+      type: ledgerEntries.type,
+      amount: ledgerEntries.amount,
+      occurredAt: ledgerEntries.occurredAt,
+      category: ledgerEntries.category,
+      memo: ledgerEntries.memo,
+      reversalTargetOccurredAt: target.occurredAt,
+      reversalTargetMemo: target.memo,
+      reversalTargetCategory: target.category,
+    })
+    .from(ledgerEntries)
+    .leftJoin(target, eq(target.id, ledgerEntries.reversalOf))
+    .where(eq(ledgerEntries.groupId, groupId))
+    .orderBy(asc(ledgerEntries.occurredAt), asc(ledgerEntries.createdAt));
+}
+
 export type RoundWithCount = Awaited<ReturnType<typeof getRoundsWithCounts>>[number];
 
 /**
