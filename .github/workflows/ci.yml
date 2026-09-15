@@ -4,41 +4,44 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      # 드리프트 가드가 커밋 범위를 diff하므로 전체 히스토리가 필요하다.
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      # schema.ts만 고치고 마이그레이션을 안 만든 커밋을 여기서 잡는다.
-      # PR은 베이스 브랜치와, main 직접 푸시는 푸시된 범위(before..HEAD)와 비교한다
-      # — 이 레포는 main 직접 푸시 워크플로라 PR만 검사하면 가드가 아무것도 막지 못한다.
-      - name: 스키마 변경 시 마이그레이션 파일 필수
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-          BEFORE: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          ZERO=0000000000000000000000000000000000000000
-          if [ "$EVENT" = "pull_request" ]; then
-            RANGE="origin/$BASE_REF...HEAD"
-          elif [ "$BEFORE" = "$ZERO" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null \
-               || ! git merge-base --is-ancestor "$BEFORE" HEAD; then
-            # 브랜치 첫 푸시·force push·GC된 커밋 — 이전 상태가 없으므로 마지막 커밋만 본다.
-            if git rev-parse -q --verify HEAD^ >/dev/null; then RANGE="HEAD^..HEAD"; else RANGE="$(git hash-object -t tree /dev/null)..HEAD"; fi
-          else
-            RANGE="$BEFORE..HEAD"
-          fi
-          echo "비교 범위: $RANGE"
-          CHANGED=$(git diff --name-only "$RANGE")
-          echo "$CHANGED"
-          SCHEMA=$(printf '%s\n' "$CHANGED" | grep -cx 'lib/db/schema.ts' || true)
-          MIGRATION=$(printf '%s\n' "$CHANGED" | grep -cE '^drizzle/.*\.sql$' || true)
-          if [ "$SCHEMA" -gt 0 ] && [ "$MIGRATION" -eq 0 ]; then
-            echo "schema.ts가 바뀌었는데 drizzle/ 마이그레이션이 없습니다 — npm run db:generate 하세요"
-            exit 1
-          fi
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
+      # 상태 검사다 — 커밋 범위를 diff하지 않고, schema.ts를 **커밋된 스냅샷**과 직접 비교한다.
+      # 범위 기반 가드(~b36f505)를 이걸로 대체한 이유:
+      #  1) 여러 커밋을 한꺼번에 덮는 force push는 HEAD^..HEAD로 후퇴해서, 교체된 범위 안쪽에
+      #     있는 schema.ts 단독 변경을 아예 들여다보지 못했다.
+      #  2) 손으로 고친 마이그레이션(0001_composite_fk.sql이 그렇다)이 스냅샷과 어긋난 경우를
+      #     범위 diff로는 원리적으로 볼 수 없다. 상태 검사는 "지금 schema.ts로 generate하면
+      #     새 마이그레이션이 나오는가"를 물으므로 히스토리 모양과 무관하게 항상 같은 답을 준다.
+      #
+      # 0.31.10에서 확인한 generate의 실제 동작 (이 스텝의 판정 방식이 여기서 나온다):
+      #  - DB에 접속하지 않는다. url이 postgresql://unused여도 정상 동작한다(스냅샷끼리 비교하므로).
+      #  - 동기 상태면 "No schema changes, nothing to migrate"만 찍고 **아무 파일도 쓰지 않는다**
+      #    — meta/_journal.json 타임스탬프도 건드리지 않아서 git status가 깨끗하게 유지된다.
+      #  - 드리프트가 있으면 새 .sql + meta/NNNN_snapshot.json을 쓰고 _journal.json을 수정하지만
+      #    **종료코드는 0이다**. 그래서 판정은 종료코드가 아니라 git status로 한다.
+      #  - 컬럼 이름 변경처럼 모호한 경우엔 TTY가 없어 프롬프트를 못 띄우고 죽는데, 이때도
+      #    종료코드가 0이고 파일도 안 쓴다 — git status만 보면 통과해 버린다.
+      #    그래서 동기 확인 메시지가 실제로 나왔는지도 함께 본다.
+      - name: 스키마와 마이그레이션 동기화 확인
+        env:
+          DATABASE_URL: postgresql://unused # generate는 DB에 접속하지 않는다
+        run: |
+          set -euo pipefail
+          # 로그는 워크스페이스 밖에 쓴다 — 레포 안에 쓰면 그 자체가 작업트리를 더럽힌다.
+          LOG="$RUNNER_TEMP/drizzle-generate.log"
+          npx drizzle-kit generate 2>&1 | tee "$LOG"
+          if [ -n "$(git status --porcelain drizzle/)" ]; then
+            echo "::error::schema.ts가 커밋된 스냅샷과 다릅니다 — 로컬에서 npm run db:generate 하고 drizzle/ 전체(.sql + meta/)를 커밋하세요"
+            git status --porcelain drizzle/
+            exit 1
+          fi
+          if ! grep -q 'No schema changes' "$LOG"; then
+            echo "::error::generate가 동기화를 확인하지 못했습니다(위 출력 참조) — 로컬에서 npm run db:generate 로 확인하세요"
+            exit 1
+          fi
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test
