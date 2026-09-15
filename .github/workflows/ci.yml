@@ -67,20 +67,19 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
   # 배포 권한은 여기 한 곳에만 둔다 — Vercel Git 자동배포를 끄면 이 잡이 유일한 배포 경로가
-  # 되므로, 이 잡의 실패를 무시하면 아무도 배포하지 않는 상태가 된다.
+  # 되므로, 이 잡의 실패를 무시하거나 끄면 아무도 프로덕션을 배포하지 않는 상태가 된다.
+  # (자동배포는 이 잡이 한 번 초록이 된 뒤에 vercel.json으로 끈다 — 순서를 뒤집으면
+  #  프로덕션을 배포하는 주체가 한동안 아무도 없게 된다.)
   #
-  # ⚠️ 막힘(2026-09-15): 등록된 VERCEL_TOKEN이 Vercel API에 거부된다("The token provided via
-  # `--token` argument is not valid" / whoami "User not found"). 길이 60자에 공백도 없으니
-  # 형식은 맞고 값이 무효(폐기됐거나 오타)다. 토큰은 CLI 세션으로 재발급할 수 없어
-  # (POST /v3/user/tokens → 403 "Cannot create tokens for this app") 사람이 대시보드에서
-  # 만들어 `gh secret set VERCEL_TOKEN`으로 넣어야 한다. 그때까지:
-  #   - migrate 스텝까지는 정상 동작한다(프로덕션 이력 1행 유지 = 무동작 확인됨).
-  #   - 배포 스텝만 빨갛다. 이 잡을 끄거나 무시하지 말 것 — 빨간 것이 유일한 신호다.
-  #   - Vercel Git 자동배포는 **아직 켜져 있다**(아래 참고). 그래서 프로덕션은 계속 배포된다.
-  #     토큰이 고쳐질 때까지 자동배포를 끄면 아무도 배포하지 않게 되므로 끄지 않는다.
-  #   - 참고: 프로젝트 설정 gitProviderOptions.createDeployments="disabled"는 저장돼 있는데도
-  #     push마다 source=git 프로덕션 배포가 계속 생성된다(효과 없음). 실제로 끄려면
-  #     vercel.json의 git.deploymentEnabled={"main": false}를 써야 한다 — 토큰 수정 후에 한다.
+  # ⚠️ Vercel CLI를 쓰지 않는 이유 (되돌리지 말 것):
+  # 등록된 VERCEL_TOKEN은 **프로젝트 스코프** 토큰이다. `GET /v9/projects/{id}`는 200인데
+  # `GET /v2/user`는 404, `GET /v2/teams`는 403이다. CLI는 모든 명령이 먼저 사용자를
+  # 조회하므로 whoami·project ls·deploy가 전부 "User not found"로 죽는다 — 토큰 값이
+  # 무효한 게 아니라 CLI가 요구하는 스코프가 아니다. REST 배포 API는 그 조회를 하지 않아
+  # 이 토큰으로 정상 동작한다. 그래서 배포는 scripts/vercel-deploy.mjs(REST)가 한다.
+  # `npx vercel deploy`로 "단순화"하면 배포가 다시 깨진다. 계정 스코프 토큰으로
+  # 교체되기 전까지는 CLI가 구조적으로 불가능하다.
+  # (부수 효과로 REST가 더 낫다: gitSource.sha로 CI가 검증한 커밋을 못 박아 배포한다.)
   deploy:
     needs: [check, e2e]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -105,25 +104,20 @@ jobs:
         run: node scripts/print-migration-history.mjs
         env:
           DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
-      # 배포 훅 대신 CLI + 토큰 — 훅은 "발동 시점의 브랜치 HEAD"를 빌드하지만
-      # 이 방식은 CI가 검증한 바로 이 커밋을 배포한다. (개정 근거는 플랜 판정 표 참조)
-      # --prebuilt(vercel pull + vercel build)는 쓰지 않는다: 빌드는 Vercel에서 돌려
-      # 지금까지 성공해 온 Git 배포와 같은 빌드 환경을 유지하고, 프로덕션 자격증명을
-      # 러너 파일시스템(.vercel/.env.production.local)에 내려받지 않는다.
-      # .vercel/은 gitignore돼 있어 체크아웃에 없다 — ORG/PROJECT ID를 env로 주면 링크 없이 배포된다.
-      # 배포가 "Could not retrieve Project Settings"로 실패하면 거의 항상 토큰 문제다.
-      # CLI가 안내하는 ".vercel 디렉터리를 지우고 다시 배포"는 오답이다 — .vercel/은 gitignore돼
-      # 있어 CI 체크아웃엔 애초에 없다. 판정은 아래 배포 스텝이 하고 이 스텝은 원인만 남긴다.
-      - name: 토큰 확인 (진단용 — 실패해도 잡을 멈추지 않는다)
-        continue-on-error: true
-        run: |
-          npx --yes vercel@51 whoami --token "$VERCEL_TOKEN" \
-            || echo "VERCEL_TOKEN이 Vercel API에 거부됐습니다 — Vercel 대시보드 Account Settings → Tokens에서 스코프를 이 프로젝트의 팀으로 두고 새로 만든 뒤 'gh secret set VERCEL_TOKEN'으로 등록하세요."
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      - name: Vercel 프로덕션 배포
-        run: npx --yes vercel@51 deploy --prod --yes --token "$VERCEL_TOKEN"
+      # 배포 훅도, CLI도 아니라 REST 배포 API다 — 이유는 위 잡 주석 참조.
+      # 스크립트가 끝 상태(READY/ERROR/CANCELED)까지 폴링하고 ERROR·CANCELED·타임아웃에
+      # 실패로 종료한다. POST만 하고 끝내면 빌드가 깨져도 잡이 초록이 되어 의미가 없다.
+      # ORG/REPO/PROJECT ID는 공개 식별자라 시크릿이 아니다(토큰만 시크릿).
+      # VERCEL_ORG_ID는 이 스텝이 쓰지 않지만, 다음 사람이 CLI를 다시 시도할 때 필요한
+      # 값이라 함께 남긴다.
+      - name: Vercel 프로덕션 배포 (REST API)
+        run: node scripts/vercel-deploy.mjs
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: team_Fw7fjivbiHUvhwLS52TEFl5N
           VERCEL_PROJECT_ID: prj_i7EtOouVzfqcORSYuZKAOqefMZnG
+          VERCEL_REPO_ID: '1365561122'
+          # ref는 브랜치 메타데이터용이고, 실제 배포되는 것은 GITHUB_SHA다 —
+          # CI가 검증한 커밋과 배포된 커밋이 어긋나지 않게 sha를 명시한다.
+          VERCEL_GIT_REF: main
+          GITHUB_SHA: ${{ github.sha }}
