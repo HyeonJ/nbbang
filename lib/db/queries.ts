@@ -118,8 +118,10 @@ export async function getRoundsWithCounts(groupId: string) {
 /**
  * 회차의 납부 멤버십 id 목록 — 회차 화면의 3수치·미납자 판정이 모두 이 집합에서 나온다.
  *
- * roundId는 호출 전에 모임으로 스코프해 확인해야 한다(getRound) — dues_payments에는
- * group_id가 없어 이 쿼리만으로는 모임 경계를 지을 수 없다.
+ * roundId는 호출 전에 모임으로 스코프해 확인해야 한다(getRound) — 이 쿼리는 roundId만 받으므로
+ * 그 자체로는 모임 경계를 지을 수 없다. (dues_payments는 이제 group_id를 갖고 복합 FK로 회차와
+ * 같은 모임에 묶여 있지만, 그것은 "행이 일관됨"을 보장할 뿐 이 함수가 남의 모임 회차를 읽는 것을
+ * 막지는 않는다 — 호출자의 스코프 확인은 여전히 필요하다.)
  */
 export async function getRoundPaidMembershipIds(roundId: string): Promise<string[]> {
   const rows = await db
