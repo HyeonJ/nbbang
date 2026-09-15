@@ -50,6 +50,23 @@ describe('roundTotals', () => {
   it('예상 총액·수납액·미납액을 계산한다', () => {
     expect(roundTotals(20000, 3, ['m1', 'm2'])).toEqual({ expected: 60000, collected: 40000, outstanding: 20000 });
   });
+  it('전원 납부면 미납은 0이다', () => {
+    expect(roundTotals(20000, 2, ['m1', 'm2']).outstanding).toBe(0);
+  });
+  it('납부 인원이 명단보다 많으면 미납은 음수다 — clamp하지 않는다', () => {
+    // 이 산술이 화면의 overpaid 분기(0 표기 + 경고)를 결정한다. 여기서 clamp해 버리면
+    // 화면은 불일치를 **조용히** 숨기게 된다 — 표기 판단은 화면 몫이라는 도메인 주석의 근거다.
+    //
+    // 이 상태를 DB로 재현하는 경로는 Task 2 이후 **설계상 사라졌다**: 타 모임 membership_id
+    // 주입은 dues_payments_membership_fk가, 납부한 멤버십 삭제는 같은 FK(ON DELETE no action)가
+    // 거부한다(test/money-paths.integration.test.ts가 둘 다 고정한다). 그래서 이 분기의 산술은
+    // 여기서 덮고, 도달 불가라는 사실 자체를 통합 테스트가 증거로 남긴다.
+    expect(roundTotals(20000, 1, ['m1', 'm2'])).toEqual({
+      expected: 20000,
+      collected: 40000,
+      outstanding: -20000,
+    });
+  });
 });
 
 describe('parsePeriod', () => {

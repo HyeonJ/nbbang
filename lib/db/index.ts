@@ -12,7 +12,10 @@ neonConfig.webSocketConstructor = ws;
 // idleTimeoutMillis: 10_000 — Vercel 동결(freeze) 구간을 건너뛴 유휴 클라이언트는
 // 이미 죽은 소켓일 수 있다. 짧게 버려서 재사용하지 않는다.
 // Client가 아니라 Pool을 쓰는 이유: 단일 공유 클라이언트면 동시 쿼리가 열린 트랜잭션 안으로 새어든다.
-const pool = new Pool({ connectionString: process.env.DATABASE_URL!, max: 5, idleTimeoutMillis: 10_000 });
+// export 이유는 테스트 종료뿐이다 — Vitest 통합 테스트는 이 풀을 명시적으로 닫아야
+// 워커 프로세스가 유휴 소켓을 붙든 채 남지 않는다(test/db-fixture.ts의 afterAll).
+// 앱 코드는 db만 쓴다.
+export const pool = new Pool({ connectionString: process.env.DATABASE_URL!, max: 5, idleTimeoutMillis: 10_000 });
 
 // node-postgres Pool은 유휴 클라이언트 장애를 'error'로 올린다. 리스너가 없으면
 // 프로세스가 그 이벤트로 죽어 같은 인스턴스의 다른 요청까지 500이 된다.

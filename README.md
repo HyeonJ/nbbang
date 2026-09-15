@@ -124,7 +124,23 @@ npm install        # 의존성 설치
 npm run dev        # 개발 서버 (http://localhost:3000)
 npm run lint       # ESLint
 npx tsc --noEmit   # 타입 체크
-npm test           # Vitest 단위 테스트
+npm test           # Vitest 단위 테스트 (DB 불필요 — CI의 check 잡이 DB 시크릿 없이 돌린다)
+npm run test:integration  # Vitest 통합 테스트 (test 브랜치 DB를 TRUNCATE한다)
 npm run build      # 프로덕션 빌드
 npm run e2e        # Playwright E2E (test 브랜치 DB를 TRUNCATE한다)
 ```
+
+### 테스트 세 층
+
+| 층 | 명령 | 대상 | 고정하는 것 |
+|---|---|---|---|
+| 단위 | `npm test` | 순수 함수 (`lib/`) | 도메인 규칙·포맷·에러 판별 |
+| 통합 | `npm run test:integration` | test 브랜치 DB 왕복 | 잔액 = 원장 합산, **어느 제약이** 모임 경계를 막는지 |
+| E2E | `npm run e2e` | 빌드된 앱 + 브라우저 | 화면 동선, 그리고 **인가 매트릭스**(`e2e/authz.spec.ts`) |
+
+인가 매트릭스는 서버 액션 POST를 역할별 세션으로 재생해 거부 코드(`FORBIDDEN`/`NOT_MEMBER`/
+`UNAUTHENTICATED`/`ENTRY_NOT_FOUND` …)를 단언한다 — 거부 화면에는 누를 버튼이 없으므로
+UI 클릭으로는 확인할 수 없는 주장이다. Plan 02에서 손으로 하던 확인을 CI가 대신한다 (ADR-002).
+
+"이 DB를 TRUNCATE해도 되는가"의 판정은 `test/db-guard.ts` **한 구현**을 Playwright와 Vitest가
+함께 쓴다. 비우는 테이블 목록도 `lib/db/schema.ts`에서 파생하므로 테이블 추가를 놓칠 수 없다.
