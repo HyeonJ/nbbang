@@ -56,3 +56,4 @@ export const duesPayments = pgTable('dues_payments', {
 }, (t) => [uniqueIndex('dues_payments_round_membership').on(t.roundId, t.membershipId)]);
 
 // 드리프트 가드 증명용 주석 (proof 1) — 이 커밋은 마이그레이션이 없다.
+// 드리프트 가드 증명 2 — 푸시된 범위(before..after) 경로.
