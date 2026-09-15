@@ -61,10 +61,12 @@ export const createRound = groupActionClient
 /**
  * 납부 체크 = 원장 엔트리(+금액) + 납부 기록 한 쌍. 한쪽만 남으면 둘 다 거짓말이 되므로 한 트랜잭션이다.
  *
- * ⚠️ 모임 경계: `dues_payments`에는 group_id가 없다 — 스코프는 roundId → dues_rounds.group_id로만
- * 지을 수 있고, 그 판정을 하는 곳은 이 액션 레이어뿐이다(DB 제약이 대신 막아주지 못한다).
- * 그래서 회차는 getRound(ctx.groupId, …)로, 멤버십은 ctx.groupId로 스코프해 읽는다.
+ * ⚠️ 모임 경계: 회차는 getRound(ctx.groupId, …)로, 멤버십은 ctx.groupId로 스코프해 읽는다 —
  * 남의 모임 roundId·membershipId는 조회 결과에 애초에 들어오지 않는다(존재 여부도 새지 않는다).
+ * 이 판정은 **더 이상 액션 레이어 단독이 아니다**: `dues_payments`의 복합 FK 세 개가
+ * (group_id, round_id)·(group_id, membership_id)·(group_id, ledger_entry_id)를 각각 같은 모임에
+ * 묶어두므로, 여기가 뚫려도 타 모임 행을 가리키는 납부 기록은 DB가 23503으로 거부한다.
+ * 그래서 groupId를 채우는 것은 선택이 아니다 — 세 FK의 공통 구성요소다.
  */
 export const markPaid = groupActionClient
   .inputSchema(z.object({ groupId: z.string(), roundId: z.string(), membershipId: z.string() }))
@@ -100,6 +102,7 @@ export const markPaid = groupActionClient
         });
         await tx.insert(duesPayments).values({
           id: crypto.randomUUID(),
+          groupId: ctx.groupId,
           roundId: round.id,
           membershipId: member.id,
           ledgerEntryId: entryId,
