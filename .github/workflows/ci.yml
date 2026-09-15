@@ -66,3 +66,41 @@ jobs:
             test-results/
           retention-days: 7
           if-no-files-found: warn
+  # 배포 권한은 여기 한 곳에만 둔다 — Vercel Git 자동배포를 끄면 이 잡이 유일한 배포 경로가
+  # 되므로, 이 잡의 실패를 무시하면 아무도 배포하지 않는 상태가 된다.
+  deploy:
+    needs: [check, e2e]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      # migrate는 적용할 게 없어도 항상 "applied successfully"를 찍는다 — 전후 이력 행 수가
+      # 실제 증거다. 이 두 스텝이 프로덕션에 적용된 것이 있는지/없는지를 로그에 남긴다.
+      - name: 적용 이력 (migrate 전)
+        run: node scripts/print-migration-history.mjs
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+      # 스키마를 먼저 올리고 그 다음 앱을 배포한다 — 순서가 뒤집히면 새 코드가 없는 컬럼을 읽는다.
+      # 이 스텝이 실패하면 잡이 멈추므로 배포는 일어나지 않고, 프로덕션은 이전 배포로 계속 서비스된다.
+      - run: npx drizzle-kit migrate
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+      - name: 적용 이력 (migrate 후)
+        run: node scripts/print-migration-history.mjs
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+      # 배포 훅 대신 CLI + 토큰 — 훅은 "발동 시점의 브랜치 HEAD"를 빌드하지만
+      # 이 방식은 CI가 검증한 바로 이 커밋을 배포한다. (개정 근거는 플랜 판정 표 참조)
+      # --prebuilt(vercel pull + vercel build)는 쓰지 않는다: 빌드는 Vercel에서 돌려
+      # 지금까지 성공해 온 Git 배포와 같은 빌드 환경을 유지하고, 프로덕션 자격증명을
+      # 러너 파일시스템(.vercel/.env.production.local)에 내려받지 않는다.
+      # .vercel/은 gitignore돼 있어 체크아웃에 없다 — ORG/PROJECT ID를 env로 주면 링크 없이 배포된다.
+      - name: Vercel 프로덕션 배포
+        run: npx --yes vercel@51 deploy --prod --yes --token "$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_Fw7fjivbiHUvhwLS52TEFl5N
+          VERCEL_PROJECT_ID: prj_i7EtOouVzfqcORSYuZKAOqefMZnG
