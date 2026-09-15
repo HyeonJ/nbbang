@@ -64,8 +64,11 @@ if (alreadyTracked > 0) {
 }
 
 // ── 이력 기록 ────────────────────────────────────────────────────────────────
-// drizzle-orm의 마이그레이터는 schema `drizzle`, 테이블 `__drizzle_migrations`를 보고
-// `.sql` 파일 원본의 sha256 해시로 적용 여부를 판단한다. created_at은 저널의 `when`(ms).
+// drizzle-orm의 마이그레이터는 schema `drizzle`, 테이블 `__drizzle_migrations`를 본다.
+// ⚠️ 적용 여부를 가르는 값은 **해시가 아니라 created_at**이다 — pg 다이얼렉트는 이력의
+// 최신 행 하나를 읽어 `lastRow.created_at < migration.folderMillis`인 것만 적용한다.
+// 해시는 기록만 되고 비교되지 않는다. 그래서 created_at에 저널의 `when`(ms)을 넣는 것이
+// 베이스라인을 "이미 적용됨"으로 만드는 핵심이고, 해시는 사람이 파일을 대조할 때 쓴다.
 const journal = JSON.parse(readFileSync('drizzle/meta/_journal.json', 'utf8')) as {
   entries: { tag: string; when: number }[];
 };
