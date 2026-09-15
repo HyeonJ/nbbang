@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createGroup, exactAmount, newClientContext, signUp, testEmail } from './helpers';
+import { createGroup, exactAmount, INVITE_JOIN_URL, newClientContext, signUp, testEmail } from './helpers';
 
 test('가입→모임 생성→초대 합류→설정 권한', async ({ browser }) => {
   test.setTimeout(120_000);
@@ -32,7 +32,7 @@ test('가입→모임 생성→초대 합류→설정 권한', async ({ browser 
   await mp.goto(invite);
   await mp.getByTestId('join-login-link').click();
   await signUp(mp, { name: '철수', email: testEmail('foundation', 'member') });
-  await expect(mp).toHaveURL(/\/invite\/.+/);
+  await expect(mp).toHaveURL(INVITE_JOIN_URL);
   await mp.getByTestId('join-display-name').fill('철수');
   await mp.getByTestId('join-submit').click();
   await expect(mp).toHaveURL(/\/groups\/[^/]+$/);

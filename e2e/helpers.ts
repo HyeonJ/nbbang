@@ -12,12 +12,13 @@ let contextSeq = 0;
 /**
  * 브라우저 컨텍스트 = 서로 다른 사람. 컨텍스트마다 다른 클라이언트 IP를 실어 보낸다.
  *
- * `browser.newContext()`를 그냥 쓰면 안 되는 이유: better-auth는 `/sign-in*`·`/sign-up*`에
- * **IP당 10초 3회** 제한을 기본으로 걸고(rate-limiter의 default special rule), 프로덕션 빌드에선
- * 클라이언트 IP를 `x-forwarded-for`에서만 찾는다. `next start`는 앞에 프록시가 없어 그 헤더가
- * 없으니 IP 해석이 실패하고, 그러면 제한 키가 `no-trusted-ip|/sign-up/email` **하나로 뭉쳐
- * 서버 전체가 버킷을 공유**한다. 두 스펙의 가입 4건이 10초 안에 들어오는 CI에선 4번째가 429로
- * 죽었다(로컬은 느려서 창을 넘기고 통과 — 그래서 CI에서만 터졌다).
+ * `browser.newContext()`를 그냥 쓰면 안 되는 이유: better-auth는 가입·로그인에 경로별 제한을
+ * 걸고(지금은 `lib/auth.ts`의 customRules), 제한 키는 `createRateLimitKey(ip, path)`다.
+ * 그런데 헤더를 안 실으면 **모든 컨텍스트의 IP가 똑같다** — `next start`는 소켓 주소로
+ * `x-forwarded-for`를 스스로 채우므로 로컬에서 들어오는 모든 요청이 루프백 한 주소로 해석되고,
+ * 결국 서버 전체가 `<loopback>|/sign-up/email` **한 버킷을 공유**한다. 그래서 두 스펙의 가입이
+ * 한 창에 겹치면 뒤쪽이 429로 죽는다 — 기본값(10초 3회) 시절 CI에서 4번째 가입이 그렇게 죽었다
+ * (로컬은 느려서 창을 넘기고 통과 — 그래서 CI에서만 터졌다).
  *
  * 실제 배포(Vercel)는 프록시가 `x-forwarded-for`를 채워 사용자별로 버킷이 갈린다. 그래서 여기서
  * 헤더를 넣는 건 제한을 끄는 우회가 아니라 **테스트를 실제 배포 형태에 맞추는 것**이다 —
@@ -31,6 +32,24 @@ export function newClientContext(browser: Browser): Promise<BrowserContext> {
     extraHTTPHeaders: { 'x-forwarded-for': `192.0.2.${WORKER_INDEX * 16 + contextSeq}` },
   });
 }
+
+/**
+ * 초대 합류 화면에 **도달했음**을 확인하는 URL 패턴.
+ *
+ * `/\/invite\/.+/`처럼 앵커 없이 쓰면 이 단언은 아무것도 지키지 못한다. 이 동선에서 이동
+ * **직전** URL은 `/login?next=/invite/<token>`인데(초대 페이지의 로그인 링크가 next를
+ * 인코딩하지 않고 그대로 붙인다) 그 문자열에도 `/invite/<token>`이 들어 있어 **가입이
+ * 일어나기 전에 이미 통과**한다. 실제로 이 때문에, 이동이 끊긴 회귀가 URL 단언을 그냥 지나쳐
+ * 다음 줄 `fill`에서 171초를 매달려 있다가 타임아웃으로 죽었다 — 원인이 URL에 있다는 걸
+ * 아무것도 알려주지 않는 실패였다.
+ *
+ * `/\/invite\/[^/?]+$/`로 좁히는 것만으론 부족하다. 이동 직전 URL은 토큰으로 끝나고 그 뒤에
+ * `/`도 `?`도 없어서 **여전히 매칭된다**. 그래서 **호스트 바로 뒤**부터 앵커를 걸어 경로 전체를
+ * 고정한다 — 쿼리에 실려온 `/invite/...`는 호스트 뒤 첫 세그먼트가 아니므로 걸리지 않는다.
+ *
+ * 두 스펙이 같은 전이를 검사하므로 패턴은 여기 한 곳에만 둔다 — 한쪽만 고쳐져 어긋나는 걸 막는다.
+ */
+export const INVITE_JOIN_URL = /^https?:\/\/[^/]+\/invite\/[^/?#]+$/;
 
 /**
  * 스펙·역할마다 겹치지 않는 테스트 이메일.

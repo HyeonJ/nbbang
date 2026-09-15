@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createGroup, exactAmount, newClientContext, signUp, testEmail } from './helpers';
+import { createGroup, exactAmount, INVITE_JOIN_URL, newClientContext, signUp, testEmail } from './helpers';
 
 /**
  * 원장 정합성 E2E — 이 스펙의 존재 이유는 "화면이 원장과 어긋나지 않음"을 고정하는 것이다.
@@ -130,7 +130,7 @@ test('지출·회비가 잔액에 정확히 반영되고 정정으로 되돌아�
   await mp.goto(invite);
   await mp.getByTestId('join-login-link').click();
   await signUp(mp, { name: '철수', email: testEmail('ledger', 'member') });
-  await expect(mp).toHaveURL(/\/invite\/.+/);
+  await expect(mp).toHaveURL(INVITE_JOIN_URL);
   await mp.getByTestId('join-display-name').fill('철수');
   await mp.getByTestId('join-submit').click();
   await expect(mp).toHaveURL(/\/groups\/[^/]+$/);
