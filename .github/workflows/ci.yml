@@ -4,7 +4,38 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # 드리프트 가드가 커밋 범위를 diff하므로 전체 히스토리가 필요하다.
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      # schema.ts만 고치고 마이그레이션을 안 만든 커밋을 여기서 잡는다.
+      # PR은 베이스 브랜치와, main 직접 푸시는 푸시된 범위(before..HEAD)와 비교한다
+      # — 이 레포는 main 직접 푸시 워크플로라 PR만 검사하면 가드가 아무것도 막지 못한다.
+      - name: 스키마 변경 시 마이그레이션 파일 필수
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          ZERO=0000000000000000000000000000000000000000
+          if [ "$EVENT" = "pull_request" ]; then
+            RANGE="origin/$BASE_REF...HEAD"
+          elif [ "$BEFORE" = "$ZERO" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null \
+               || ! git merge-base --is-ancestor "$BEFORE" HEAD; then
+            # 브랜치 첫 푸시·force push·GC된 커밋 — 이전 상태가 없으므로 마지막 커밋만 본다.
+            if git rev-parse -q --verify HEAD^ >/dev/null; then RANGE="HEAD^..HEAD"; else RANGE="$(git hash-object -t tree /dev/null)..HEAD"; fi
+          else
+            RANGE="$BEFORE..HEAD"
+          fi
+          echo "비교 범위: $RANGE"
+          CHANGED=$(git diff --name-only "$RANGE")
+          echo "$CHANGED"
+          SCHEMA=$(printf '%s\n' "$CHANGED" | grep -cx 'lib/db/schema.ts' || true)
+          MIGRATION=$(printf '%s\n' "$CHANGED" | grep -cE '^drizzle/.*\.sql$' || true)
+          if [ "$SCHEMA" -gt 0 ] && [ "$MIGRATION" -eq 0 ]; then
+            echo "schema.ts가 바뀌었는데 drizzle/ 마이그레이션이 없습니다 — npm run db:generate 하세요"
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
