@@ -61,8 +61,18 @@ npm run db:migrate:test   # test (.env.test)
 E2E(`npm run e2e`)는 실행마다 test 브랜치에 `drizzle-kit migrate`를 돌린다 — 그래서 마이그레이션
 누락·오류는 CI에서 빨갛게 드러난다.
 
-`production` 적용은 **아직 수동이다** — CI 배포 잡(Plan 03 Task 1 Step 6)이 붙기 전까지는 아래
-"마이그레이션 문제 해결" 2번의 production 절차로 env를 임시로 받아 `drizzle-kit migrate`를 돌린다.
+`production` 적용과 배포는 **main 푸시 시 CI의 `deploy` 잡이 한다**. 순서는 마이그레이션 →
+배포다(스키마를 먼저 올려야 새 코드가 없는 컬럼을 읽지 않는다). 마이그레이션이 실패하면 잡이
+멈춰 배포가 일어나지 않고, 프로덕션은 이전 배포로 계속 서비스된다.
+
+배포는 Vercel CLI가 아니라 REST API(`scripts/vercel-deploy.mjs`)로 한다 — 등록된
+`VERCEL_TOKEN`이 프로젝트 스코프 토큰이어서 CLI가 동작하지 않는다(사유는
+[ci.yml](.github/workflows/ci.yml)의 `deploy` 잡 주석). 스크립트는 배포가 끝 상태에
+이를 때까지 폴링하므로 빌드 실패는 CI에서 빨갛게 드러난다.
+
+Vercel의 **Git 자동배포는 [vercel.json](vercel.json)의 `git.deploymentEnabled.main=false`로
+꺼져 있다** — 그래서 `deploy` 잡이 유일한 배포 경로다. 이 잡을 끄거나 실패를 무시하면
+프로덕션을 배포하는 주체가 아무도 없게 된다.
 
 ## 마이그레이션 문제 해결
 
