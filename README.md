@@ -59,7 +59,10 @@ npm run db:migrate:test   # test (.env.test)
 ```
 
 E2E(`npm run e2e`)는 실행마다 test 브랜치에 `drizzle-kit migrate`를 돌린다 — 그래서 마이그레이션
-누락·오류는 CI에서 빨갛게 드러난다. `production` 적용은 CI의 배포 단계가 담당한다.
+누락·오류는 CI에서 빨갛게 드러난다.
+
+`production` 적용은 **아직 수동이다** — CI 배포 잡(Plan 03 Task 1 Step 6)이 붙기 전까지는 아래
+"마이그레이션 문제 해결" 2번의 production 절차로 env를 임시로 받아 `drizzle-kit migrate`를 돌린다.
 
 ## 마이그레이션 문제 해결
 
@@ -80,11 +83,15 @@ select * from drizzle.__drizzle_migrations order by created_at;
 ```bash
 npx dotenv -e .env.local -- node scripts/mark-migration-applied.mts   # dev
 npx dotenv -e .env.test  -- node scripts/mark-migration-applied.mts   # test
-# production — 커밋하지 않는 임시 파일로 받아 쓰고 즉시 지운다
+# production — 커밋하지 않는 임시 파일로 받아 쓰고 즉시 지운다 (.env*는 .gitignore에 있다)
 npx vercel env pull .env.production.local --environment=production
 npx dotenv -e .env.production.local -- node scripts/mark-migration-applied.mts
+npx dotenv -e .env.production.local -- drizzle-kit migrate   # production에 마이그레이션 적용
 rm .env.production.local
 ```
+
+`.mts`는 Node의 내장 타입 제거로 실행한다 — Node 22.18+ 또는 23+가 필요하다(그 아래라면
+`npx tsx scripts/mark-migration-applied.mts`).
 
 **3. 마이그레이션은 성공했는데 배포가 실패했을 때** — 스키마를 되돌리지 않는다. 마이그레이션은
 추가 전용이므로 **이전 앱 버전이 계속 동작한다**(새 컬럼을 안 읽을 뿐). Vercel에서 이전 배포로
