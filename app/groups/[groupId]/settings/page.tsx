@@ -7,6 +7,7 @@ import { Cell, DataTable, Row } from '@/components/ui/data-table';
 import { GroupTabs } from '@/components/ui/group-tabs';
 import { PageHeader, RoleBadge } from '@/components/ui/page-header';
 import InviteLinkPanel from './invite-link-panel';
+import PublicLinkPanel from './public-link-panel';
 
 export default async function GroupSettingsPage({ params }: { params: Promise<{ groupId: string }> }) {
   const { groupId } = await params;
@@ -54,6 +55,15 @@ export default async function GroupSettingsPage({ params }: { params: Promise<{ 
         <h2 className="font-display text-[12px] font-bold tracking-[0.14em] text-ink uppercase">초대 링크</h2>
         <div className="mt-4 border-t-2 border-ink pt-5">
           <InviteLinkPanel groupId={groupId} initialToken={group.inviteToken} />
+        </div>
+      </section>
+
+      <section className="pt-10">
+        <h2 className="font-display text-[12px] font-bold tracking-[0.14em] text-ink uppercase">공개 장부 링크</h2>
+        <div className="mt-4 border-t-2 border-ink pt-5">
+          {/* 토큰 **하나만** 넘긴다 — group 행을 통째로 넘기면 inviteToken까지 클라이언트 번들의
+              직렬화 prop으로 실려 나간다(공개 장부의 유출 테스트가 잡는 것과 같은 계열의 실수). */}
+          <PublicLinkPanel groupId={groupId} initialToken={group.publicToken} />
         </div>
       </section>
     </main>

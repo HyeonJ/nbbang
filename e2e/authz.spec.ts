@@ -58,6 +58,18 @@ let ownerCtx: BrowserContext;
 let memberCtx: BrowserContext;
 let outsiderCtx: BrowserContext;
 let anonCtx: BrowserContext;
+/**
+ * 네 번째 역할: **공개 장부 링크만 가진 방문자**(Plan 03 Task 8).
+ *
+ * 이 매트릭스는 원래 쓰기 3역할(총무·멤버·비멤버)만 덮었다. 공개 장부가 생기면서
+ * "읽을 권한이 있는 미인증 방문자"라는 **새로운 종류의 주체**가 나타났고, 그 사람이 읽기에서
+ * 쓰기로 넘어갈 수 있는지는 기존 세 역할 중 어느 것도 답하지 않는다.
+ * 공개 토큰은 **읽기 전용 베어러**여야 한다 — 쿠키가 아니므로 세션이 되지 않고,
+ * 따라서 쓰기 액션 5종은 전부 `UNAUTHENTICATED`로 떨어져야 한다.
+ */
+let publicVisitorCtx: BrowserContext;
+/** 그 방문자가 실제로 장부를 **읽을 수 있는** 링크 — 읽기 권한이 있다는 전제가 참이어야 한다. */
+let publicUrl = '';
 
 // DATABASE_URL은 playwright.config.ts가 .env.test에서 로드했거나 CI가 주입한 값 —
 // global-setup이 이미 센티널·dev DB 가드를 통과시킨 그 DB다. 여기서는 **읽기만** 한다.
@@ -241,6 +253,13 @@ test.describe('인가 매트릭스', () => {
     // ── 미인증: 쿠키 없는 컨텍스트 ─────────────────────────────────────────
     anonCtx = await newClientContext(browser);
 
+    // ── 공개 장부 방문자: 쿠키는 없고 공개 링크만 아는 사람 ────────────────────
+    await op.goto(`/groups/${fx.gidA}/settings`);
+    const publicLocator = op.getByTestId('public-link');
+    await expect(publicLocator).toContainText(`${ORIGIN}/g/`);
+    publicUrl = (await publicLocator.innerText()).trim();
+    publicVisitorCtx = await newClientContext(browser);
+
     // ── 소재 id 회수 ──────────────────────────────────────────────────────
     const entries = (await sql`
       select id, group_id, type, amount, reversal_of from ledger_entries`) as {
@@ -274,7 +293,13 @@ test.describe('인가 매트릭스', () => {
   });
 
   test.afterAll(async () => {
-    await Promise.all([ownerCtx?.close(), memberCtx?.close(), outsiderCtx?.close(), anonCtx?.close()]);
+    await Promise.all([
+      ownerCtx?.close(),
+      memberCtx?.close(),
+      outsiderCtx?.close(),
+      anonCtx?.close(),
+      publicVisitorCtx?.close(),
+    ]);
   });
 
   /** 역할과 무관하게 형식이 올바른 정상 입력 — 거부는 인가에서 나야 한다(입력 검증이 아니라). */
@@ -311,6 +336,31 @@ test.describe('인가 매트릭스', () => {
     const baseline = await writeCounts();
     for (const [action, input] of validInputs()) {
       await expectDenied(anonCtx, action, input, 'UNAUTHENTICATED', baseline);
+    }
+  });
+
+  /**
+   * 공개 장부 토큰은 **읽기 전용 베어러**다 — 읽기 권한이 쓰기로 승격되지 않는다.
+   *
+   * 이 테스트는 두 주장을 한 번에 한다:
+   *  1. 이 컨텍스트는 정말로 장부를 **읽을 수 있다**(그래서 이 역할이 실재한다),
+   *  2. 그런데도 쓰기 액션 5종은 전부 UNAUTHENTICATED다 — 토큰이 세션이 되지 않는다.
+   * 1번이 없으면 "그냥 아무 권한도 없는 컨텍스트"를 시험하는 것이라 anonCtx와 구별되지 않는다.
+   */
+  test('공개 장부 링크 보유자는 읽을 수 있어도 쓰기 5종은 전부 UNAUTHENTICATED다', async () => {
+    const page = await publicVisitorCtx.newPage();
+    expect(await publicVisitorCtx.cookies(), '공개 방문자에게 쿠키가 있다').toEqual([]);
+    await page.goto(publicUrl);
+    // 읽기는 된다 — 이 역할이 anonCtx와 다른 지점.
+    await expect(page.getByTestId('public-group-name')).toHaveText('인가모임');
+    await page.close();
+
+    // 읽었다고 세션이 생기지도 않는다 — 공개 라우트는 쿠키를 심지 않는다.
+    expect(await publicVisitorCtx.cookies(), '공개 장부를 읽었더니 쿠키가 생겼다').toEqual([]);
+
+    const baseline = await writeCounts();
+    for (const [action, input] of validInputs()) {
+      await expectDenied(publicVisitorCtx, action, input, 'UNAUTHENTICATED', baseline);
     }
   });
 
