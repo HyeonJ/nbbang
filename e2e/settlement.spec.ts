@@ -178,3 +178,142 @@ test('3명 정산 — 미리보기·결과·공유 문구가 맞고 원장은 �
   await chulsoo.context.close();
   await younghee.context.close();
 });
+
+/**
+ * 정산 제목에 쓰는 **어떤 픽스처도 만들 수 없는 문자열**.
+ * 공개 장부 원시 본문·CSV 본문에서 이 문자열을 찾는 방식으로 "정산이 저 두 곳에 새지 않는다"를
+ * 본다. 사람이 읽는 제목(`4월 뒤풀이`)으로 검사하면 다른 소재와 우연히 겹칠 수 있다.
+ */
+const SETTLE_MARKER = '뒤풀이-SETTLE-OUTSIDE-LEDGER-4291';
+
+/**
+ * v1 전체 흐름 — F2·F3으로 **0이 아닌** 원장을 만든 뒤 정산하고, 잔액·공개 장부·CSV가
+ * 하나도 움직이지 않음을 본다.
+ *
+ * ── 왜 위 테스트로는 부족한가 (Task 11에서 찾은 실제 빈틈) ──────────────────
+ * 위 테스트의 ADR-003 단언은 **빈 원장**에서 이뤄진다(잔액 0 · 엔트리 0행). 그것은
+ * "정산이 원장에 쓰지 않는다"의 절반만 증명한다 — 0을 0으로 확인하는 것이라, 정산이 원장을
+ * **읽어서** 무언가를 다시 계산하거나, 합산 쿼리에 정산 테이블을 끼워 넣는 회귀는 0에서는
+ * 드러나지 않는다(0 ± 0 = 0). 통합 테스트도 원장 쪽을 보지 않고(`settlement.integration.test.ts`는
+ * 참여자·이체·FK만 본다) 공개 장부 스펙은 정산을 아예 만들지 않는다. 즉 **0이 아닌 잔액에
+ * 정산을 얹는 경로는 이 테스트 전까지 어디에서도 검사되지 않았다.**
+ *
+ * 그리고 같은 주장을 **세 표면**에서 본다 — 대시보드(인증된 화면), 공개 장부(인증 없는 화면),
+ * CSV(파일). 셋은 서로 다른 쿼리를 쓴다(`queries.ts` / `public-queries.ts` / 내보내기 라우트).
+ * 한 곳에서만 확인하면 나머지 두 쿼리에 정산이 섞여 들어가는 회귀를 놓친다. CSV는 **바이트
+ * 동일성**으로 본다 — 가장 강한 형태이고, 파일이라 가능하다.
+ */
+test('v1 전체 흐름 — 회비·지출이 있는 모임에서 정산해도 잔액·공개 장부·CSV가 그대로다', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+
+  const ownerContext = await newClientContext(browser);
+  const op = await ownerContext.newPage();
+
+  // ── 1) 총무 + 멤버 1명 ────────────────────────────────────────────────────
+  await op.goto('/login');
+  await signUp(op, { name: '민지', email: testEmail('v1flow', 'owner') });
+  await expect(op).toHaveURL(/\/groups$/);
+  const groupId = await createGroup(op, 'v1모임', '민지');
+
+  await op.goto(`/groups/${groupId}/settings`);
+  await expect(op.getByTestId('invite-link')).toContainText('http://localhost:3000/invite/');
+  const invite = (await op.getByTestId('invite-link').innerText()).trim();
+  const publicLocator = op.getByTestId('public-link');
+  await expect(publicLocator).toContainText('http://localhost:3000/g/');
+  const publicUrl = (await publicLocator.innerText()).trim();
+
+  const chulsoo = await joinViaInvite(browser, invite, '철수', 'v1member');
+
+  // ── 2) 지출 30,000 (F3) + 회비 10,000 납부 1건 (F2) → 잔액 −20,000 ─────────
+  await op.goto(`/groups/${groupId}/expenses`);
+  await op.getByTestId('expense-amount-input').fill('30000');
+  await op.getByTestId('expense-date').fill('2026-04-02');
+  await op.getByTestId('expense-category').fill('대관료');
+  await op.getByTestId('expense-submit').click();
+  await expect(op.getByTestId('expense-row')).toHaveCount(1);
+
+  await op.goto(`/groups/${groupId}/dues`);
+  await op.getByTestId('round-period').fill('2026-04');
+  await op.getByTestId('round-amount').fill('10000');
+  await op.getByTestId('round-create').click();
+  await expect(op).toHaveURL(/\/dues\/[^/]+$/);
+  await op.getByTestId('payment-toggle').first().click();
+  await expect(op.getByTestId('round-total-collected')).toHaveText(exactAmount('10,000'));
+
+  await op.goto(`/groups/${groupId}`);
+  await expect(op.getByTestId('group-balance')).toHaveText(exactAmount('−20,000'));
+  // 원장 2줄(지출 1 + 회비 납부 1) — 정산 뒤에도 이 숫자여야 한다.
+  await expect(op.getByTestId('recent-entry-row')).toHaveCount(2);
+
+  // ── 3) 정산 전 세 표면의 상태를 **떠 둔다** ───────────────────────────────
+  const anonContext = await newClientContext(browser);
+  const publicBefore = await anonContext.request.get(publicUrl);
+  expect(publicBefore.status(), '공개 장부를 못 읽었다').toBe(200);
+  const publicBodyBefore = await publicBefore.text();
+
+  const exportUrl = `/api/groups/${groupId}/export`;
+  const csvBefore = await ownerContext.request.get(exportUrl);
+  expect(csvBefore.status(), 'CSV를 못 받았다').toBe(200);
+  const csvBytesBefore = await csvBefore.body();
+  // 원장 2줄 + 헤더 = 3줄. 이 숫자가 맞지 않으면 아래 바이트 비교가 엉뚱한 것을 비교한다.
+  expect(csvBytesBefore.toString('utf8').trimEnd().split('\r\n')).toHaveLength(3);
+
+  // ── 4) 정산 9,000원 · 2명 (F4) ────────────────────────────────────────────
+  await op.goto(`/groups/${groupId}/settle/new`);
+  await expect(op.getByTestId('settle-participant')).toHaveCount(2);
+  await op.getByTestId('settle-title').fill(SETTLE_MARKER);
+  await op.getByTestId('settle-date').fill('2026-04-20');
+  await op.getByTestId('settle-total').fill('9000');
+  await op.getByTestId('settle-submit').click();
+  await expect(op).toHaveURL(/\/settle\/[0-9a-f-]{36}$/);
+
+  // 2명이 9,000을 나누면 4,500씩, 이체는 1건 4,500원.
+  await expect(op.getByTestId('settle-per-share')).toHaveText(exactAmount('4,500'));
+  await expect(op.getByTestId('settle-transfer-row')).toHaveCount(1);
+  await expect(op.getByTestId('settle-transfer-total')).toHaveText(exactAmount('4,500'));
+
+  // ── 5) 대시보드 — 잔액·원장 행 수 둘 다 그대로다 (ADR-003) ────────────────
+  await op.goto(`/groups/${groupId}`);
+  await expect(op.getByTestId('group-balance')).toHaveText(exactAmount('−20,000'));
+  await expect(op.getByTestId('recent-entry-row')).toHaveCount(2);
+
+  // ── 6) 공개 장부 — 잔액·행 수가 같고 정산은 흔적조차 없다 ─────────────────
+  const publicPage = await anonContext.newPage();
+  await publicPage.goto(publicUrl);
+  await expect(publicPage.getByTestId('public-balance')).toHaveText(exactAmount('−20,000'));
+  await expect(publicPage.getByTestId('public-entry-row')).toHaveCount(2);
+  await publicPage.close();
+
+  const publicAfter = await anonContext.request.get(publicUrl);
+  const publicBodyAfter = await publicAfter.text();
+  expect(publicBodyAfter, '공개 장부 본문에 정산 제목이 들어 있다').not.toContain(SETTLE_MARKER);
+  // 본문 전체를 바이트로 비교하지 않는 이유: 공개 페이지는 멤버 명단·빌드 id 등 정산과 무관한
+  // 조각을 함께 실어 회귀와 무관한 차이가 생길 수 있다. 대신 **금액 행들**을 뽑아 비교한다.
+  const amountsOf = (body: string) => body.match(/[+−-]?[\d,]{3,}원/g) ?? [];
+  expect(amountsOf(publicBodyAfter), '공개 장부의 금액 구성이 바뀌었다').toEqual(
+    amountsOf(publicBodyBefore),
+  );
+
+  // ── 7) CSV — **바이트가 완전히 같다** ────────────────────────────────────
+  const csvAfter = await ownerContext.request.get(exportUrl);
+  const csvBytesAfter = await csvAfter.body();
+  expect(csvBytesAfter.toString('utf8'), 'CSV에 정산 제목이 들어 있다').not.toContain(
+    SETTLE_MARKER,
+  );
+  expect(
+    csvBytesAfter.equals(csvBytesBefore),
+    '정산 전후 CSV 바이트가 다르다 — 정산이 원장 내보내기에 섞였다',
+  ).toBe(true);
+
+  // ── 8) 정산은 정산 탭에만 남는다 — 사라진 게 아니라 다른 곳에 있다 ────────
+  // 6·7의 "없다"가 "정산이 저장되지 않았다"로 통과하는 것을 막는 대조군이다.
+  await op.goto(`/groups/${groupId}/settle`);
+  await expect(op.getByTestId('settlement-row')).toHaveCount(1);
+  await expect(op.getByTestId('settlement-row')).toContainText(SETTLE_MARKER);
+
+  await anonContext.close();
+  await ownerContext.close();
+  await chulsoo.context.close();
+});

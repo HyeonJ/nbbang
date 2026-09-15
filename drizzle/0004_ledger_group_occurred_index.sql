@@ -1,0 +1,1 @@
+CREATE INDEX "ledger_entries_group_occurred" ON "ledger_entries" USING btree ("group_id","occurred_at" DESC NULLS LAST,"created_at" DESC NULLS LAST);

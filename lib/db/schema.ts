@@ -1,6 +1,7 @@
 import {
   boolean,
   foreignKey,
+  index,
   integer,
   pgTable,
   text,
@@ -77,6 +78,23 @@ export const ledgerEntries = pgTable('ledger_entries', {
     foreignColumns: [t.groupId, t.id],
     name: 'ledger_entries_reversal_fk',
   }),
+  /**
+   * 이 레포에서 가장 자주 도는 읽기의 모양 그대로다 — `where group_id = ? order by occurred_at`.
+   * 그 형태를 쓰는 곳이 넷이다: 대시보드 최근 기록·지출 목록·공개 장부(`public-queries.ts`)·
+   * CSV 내보내기. 잔액 합산(`sum(amount) where group_id`)까지 더하면 다섯이다.
+   *
+   * ⚠️ 정직하게 적어둘 것: `group_id` **단독 조회는 이미 인덱스를 탄다** —
+   * `ledger_entries_group_id_key`(복합 FK의 참조 대상인 UNIQUE (group_id, id))가 선행 컬럼으로
+   * group_id를 갖기 때문이다. 그래서 이 인덱스가 새로 제거하는 것은 **정렬 단계**이지 순차
+   * 스캔이 아니다 — "순차 스캔을 없앤다"는 과장은 하지 않는다.
+   *
+   * 플랜의 Self-Review는 이 인덱스를 "v1 규모에서 불필요"로 의도적 제외했었다. Task 11에서
+   * 뒤집은 근거: 마이그레이션 파이프라인(Task 1)이 생긴 뒤로 인덱스 추가는 **추가 전용 SQL 한
+   * 줄**이 됐고, 행이 적은 지금이 가장 싼 시점이다(나중에는 같은 작업을 트래픽 아래에서 해야
+   * 한다). `desc`로 적은 이유는 네 읽기 중 셋이 내림차순이기 때문이고, CSV의 오름차순 읽기도
+   * 같은 인덱스를 **역방향 스캔**으로 쓴다 — 방향 때문에 인덱스가 둘 필요해지지 않는다.
+   */
+  index('ledger_entries_group_occurred').on(t.groupId, t.occurredAt.desc(), t.createdAt.desc()),
 ]);
 
 export const duesRounds = pgTable('dues_rounds', {

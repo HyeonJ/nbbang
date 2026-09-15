@@ -38,8 +38,14 @@ jobs:
             git status --porcelain drizzle/
             exit 1
           fi
+          # ⚠️ 'No schema changes'는 **drizzle-kit이 찍는 문구**다(0.31.10에서 확인). 즉 이 가드는
+          # 서드파티의 출력 문장에 매달려 있다 — 버전을 올려 문구가 바뀌면 "동기 상태인데도"
+          # 이 grep이 실패해 check 잡이 빨개진다. 그 실패는 드리프트가 아니라 **문구 변경**이므로,
+          # 여기서 빨개지고 위 git status는 깨끗하다면 새 버전의 실제 출력을 보고 이 문자열을
+          # 고치는 것이 옳은 대응이다(가드를 지우는 것이 아니다). 반대로 이 grep을 느슨하게
+          # 하면 "프롬프트를 못 띄워 죽은" 경우가 다시 조용히 통과한다 — 이 2단 판정의 존재 이유다.
           if ! grep -q 'No schema changes' "$LOG"; then
-            echo "::error::generate가 동기화를 확인하지 못했습니다(위 출력 참조) — 로컬에서 npm run db:generate 로 확인하세요"
+            echo "::error::generate가 동기화를 확인하지 못했습니다(위 출력 참조) — 로컬에서 npm run db:generate 로 확인하세요. drizzle-kit 버전을 올렸다면 'No schema changes' 문구 자체가 바뀌었을 수 있습니다(이 스텝의 주석 참고)"
             exit 1
           fi
       - run: npm run lint

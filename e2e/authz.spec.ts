@@ -32,8 +32,23 @@ import { createGroup, INVITE_JOIN_URL, newClientContext, signUp, testEmail } fro
 
 const ORIGIN = 'http://localhost:3000';
 
-/** 쓰기 액션 5종. 값은 포획한 Next-Action id. */
-type ActionName = 'createExpense' | 'reverseEntry' | 'createRound' | 'markPaid' | 'unmarkPaid';
+/**
+ * 쓰기 액션 7종. 값은 포획한 Next-Action id.
+ *
+ * 뒤의 둘(`regenerate*`)은 원래 이 매트릭스에 없었다 — 포획하려면 총무가 실제로 재발급을 해야
+ * 하고, 그러면 **네 번째 역할이 읽는 공개 링크가 그 자리에서 죽는다**. 순서로 풀었다:
+ * 재발급을 먼저 하고 그 뒤에 공개 링크를 읽는다(beforeAll), 성공 대조군은 맨 마지막 테스트다.
+ * 이 둘이 빠져 있으면 `assertOwner`를 지나는 액션 중 **링크 재발급만** 인가 회귀 감시 밖에 남는다
+ * — 토큰 재발급은 "옛 링크를 죽이는" 쓰기이므로 남이 부를 수 있으면 모임 장부 접근이 끊긴다.
+ */
+type ActionName =
+  | 'createExpense'
+  | 'reverseEntry'
+  | 'createRound'
+  | 'markPaid'
+  | 'unmarkPaid'
+  | 'regenerateInviteToken'
+  | 'regeneratePublicToken';
 const ids = {} as Record<ActionName, string>;
 
 /** 재생에 쓸 소재 — 모임 A(총무·멤버)와 남의 모임 B. */
@@ -65,7 +80,7 @@ let anonCtx: BrowserContext;
  * "읽을 권한이 있는 미인증 방문자"라는 **새로운 종류의 주체**가 나타났고, 그 사람이 읽기에서
  * 쓰기로 넘어갈 수 있는지는 기존 세 역할 중 어느 것도 답하지 않는다.
  * 공개 토큰은 **읽기 전용 베어러**여야 한다 — 쿠키가 아니므로 세션이 되지 않고,
- * 따라서 쓰기 액션 5종은 전부 `UNAUTHENTICATED`로 떨어져야 한다.
+ * 따라서 쓰기 액션 7종은 전부 `UNAUTHENTICATED`로 떨어져야 한다.
  */
 let publicVisitorCtx: BrowserContext;
 /** 그 방문자가 실제로 장부를 **읽을 수 있는** 링크 — 읽기 권한이 있다는 전제가 참이어야 한다. */
@@ -76,7 +91,8 @@ let publicUrl = '';
 const sql = neon(process.env.DATABASE_URL!);
 
 /**
- * 쓰기가 샜는지 보는 계수 — 거부 뒤에 이 숫자가 하나라도 움직이면 인가가 뚫린 것이다.
+ * 쓰기가 샜는지 보는 상태 — 거부 뒤에 이 중 하나라도 움직이면 인가가 뚫린 것이다.
+ * 행 계수 셋 + **토큰 값**이다(재발급 액션은 행을 늘리지 않고 값을 덮어쓴다).
  *
  * ⚠️ 반드시 이 스펙의 두 모임으로 **스코프**한다. 전역 count로 세면 같은 창에서 병렬로 도는
  * 다른 스펙(ledger.spec)의 쓰기가 섞여 들어와 기준값이 흔들린다 — 인가와 무관한 플레이키가 된다.
@@ -87,8 +103,18 @@ async function writeCounts() {
     select
       (select count(*)::int from ledger_entries where group_id in (${fx.gidA}, ${fx.gidB})) as entries,
       (select count(*)::int from dues_payments  where group_id in (${fx.gidA}, ${fx.gidB})) as payments,
-      (select count(*)::int from dues_rounds    where group_id in (${fx.gidA}, ${fx.gidB})) as rounds`;
-  return row as { entries: number; payments: number; rounds: number };
+      (select count(*)::int from dues_rounds    where group_id in (${fx.gidA}, ${fx.gidB})) as rounds,
+      -- 재발급 액션의 쓰기는 **행을 늘리지 않는다** — groups의 두 컬럼을 덮어쓴다. 계수만 보면
+      -- 그 유출이 전부 보이지 않으므로 토큰 값 자체를 상태에 넣는다. 부수 효과로 다른 다섯
+      -- 액션의 거부도 "토큰을 건드리지 않았다"까지 함께 단언하게 된다.
+      (select string_agg(invite_token || '|' || public_token, ',' order by id)
+         from groups where id in (${fx.gidA}, ${fx.gidB})) as tokens`;
+  return row as {
+    entries: number;
+    payments: number;
+    rounds: number;
+    tokens: string;
+  };
 }
 
 /**
@@ -121,9 +147,63 @@ async function replay(ctx: BrowserContext, action: ActionName, input: unknown): 
   return res.text();
 }
 
+/** next-safe-action이 돌려주는 결과 봉투. 이 세 키 말고는 들어오지 않는다. */
+const RESULT_KEYS = ['data', 'serverError', 'validationErrors'] as const;
+
+/**
+ * 플라이트 응답에서 **액션 결과 객체 한 개**를 꺼낸다 — 모양까지 확인한다.
+ *
+ * ── 왜 정규식 한 줄로는 부족한가 ────────────────────────────────────────────
+ * 원래 이 파일은 응답 본문을 `/"serverError":"([^"]+)"/`로 긁었다. 그 방식은 **응답이 액션
+ * 결과가 아니게 된 것을 구별하지 못한다.** 재생 대상은 `/`이고(헤더 주석 3번), 지금 `/`는
+ * 인증 없이 열리므로 응답은 액션 결과 한 줄뿐인 최소 페이로드다. 그런데 `/`가 언젠가
+ * 로그인 뒤로 들어가면(랜딩을 대시보드로 바꾸는 흔한 변경) 미인증·공개방문자 컨텍스트의 POST는
+ * 액션에 닿기 전에 리다이렉트·로그인 렌더로 갈리고, 본문에는 `serverError`가 아예 없어진다.
+ * 그때 `?? null`은 "성공"과 구별되지 않는 `null`을 돌려준다 — `expectAllowed`는 본문에
+ * `"data"`라는 **문자열이 있는지**만 봤으므로, 렌더된 페이지에 그 네 글자가 섞이면
+ * 매트릭스 전체가 아무것도 검사하지 않고 초록이 될 수 있었다.
+ *
+ * 그래서 파싱을 **구조로** 한다: 플라이트 행(`N:<json>`)들 중 위 세 키를 가진 객체를 찾아
+ * 정확히 하나일 것을 요구하고, 모르는 키가 섞여 있으면 깬다. 이게 "재생이 여전히 액션에
+ * 닿고 있다"의 증거이고, 닿지 않게 되면 조용한 초록이 아니라 **명시적 실패**가 된다.
+ */
+function actionResultOf(body: string): {
+  data?: unknown;
+  serverError?: string;
+  validationErrors?: unknown;
+} {
+  const found = body
+    .split('\n')
+    .map((line) => /^[0-9a-f]+:(\{.*\})$/.exec(line.trim())?.[1])
+    .filter((json): json is string => !!json)
+    .map((json) => {
+      try {
+        return JSON.parse(json) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    })
+    .filter(
+      (obj): obj is Record<string, unknown> =>
+        !!obj && RESULT_KEYS.some((k) => Object.hasOwn(obj, k)),
+    );
+
+  expect(
+    found.length,
+    `액션 결과 행을 찾지 못했다(또는 여러 개다) — 재생이 액션에 닿지 않는다. 본문: ${body}`,
+  ).toBe(1);
+  const result = found[0];
+  expect(
+    Object.keys(result).filter((k) => !(RESULT_KEYS as readonly string[]).includes(k)),
+    `액션 결과에 모르는 키가 있다 — 응답 모양이 바뀌었다. 본문: ${body}`,
+  ).toEqual([]);
+  return result;
+}
+
 /** 플라이트 응답에서 액션이 돌려준 도메인 코드를 뽑는다. 성공이면 null. */
 function serverErrorOf(body: string): string | null {
-  return /"serverError":"([^"]+)"/.exec(body)?.[1] ?? null;
+  const { serverError } = actionResultOf(body);
+  return serverError ?? null;
 }
 
 /**
@@ -148,8 +228,11 @@ async function expectDenied(
 /** 성공 단언 — 재생 경로가 실제로 액션에 도달함을 보이는 대조군. */
 async function expectAllowed(ctx: BrowserContext, action: ActionName, input: unknown) {
   const body = await replay(ctx, action, input);
-  expect(serverErrorOf(body), `${action}: 성공해야 하는데 거부됐다 — ${body}`).toBeNull();
-  expect(body, `${action}: data가 없다 — ${body}`).toContain('"data"');
+  const result = actionResultOf(body);
+  expect(result.serverError ?? null, `${action}: 성공해야 하는데 거부됐다 — ${body}`).toBeNull();
+  expect(result.validationErrors ?? null, `${action}: 입력 검증에서 걸렸다 — ${body}`).toBeNull();
+  // 문자열 포함이 아니라 **키의 존재**로 본다 — 렌더된 페이지에 우연히 섞인 `"data"`가 아니다.
+  expect(Object.hasOwn(result, 'data'), `${action}: data가 없다 — ${body}`).toBe(true);
   return body;
 }
 
@@ -253,11 +336,31 @@ test.describe('인가 매트릭스', () => {
     // ── 미인증: 쿠키 없는 컨텍스트 ─────────────────────────────────────────
     anonCtx = await newClientContext(browser);
 
+    // ── 재발급 액션 2종의 id 포획 — **공개 링크를 읽기 전에** ─────────────────
+    // 이 둘은 포획 자체가 파괴적이다: 클릭하면 그 자리에서 옛 토큰이 죽는다. 그래서 순서가
+    // 해법이다 — 멤버가 이미 합류를 끝냈으므로 초대 토큰을 돌려도 잃을 것이 없고, 공개 토큰은
+    // 돌린 **뒤에** 읽어서 네 번째 역할이 살아 있는 링크를 받는다.
+    // 두 패널 모두 window.confirm을 거친다 — 위에서 등록한 dialog 핸들러가 수락한다.
+    await op.goto(`/groups/${fx.gidA}/settings`);
+    const inviteBefore = (await op.getByTestId('invite-link').innerText()).trim();
+    ids.regenerateInviteToken = await captureActionId(op, () =>
+      op.getByTestId('invite-regenerate').click(),
+    );
+    await expect(op.getByTestId('invite-link')).not.toHaveText(inviteBefore);
+
+    const publicBefore = (await op.getByTestId('public-link').innerText()).trim();
+    ids.regeneratePublicToken = await captureActionId(op, () =>
+      op.getByTestId('public-regenerate').click(),
+    );
+    await expect(op.getByTestId('public-link')).not.toHaveText(publicBefore);
+
     // ── 공개 장부 방문자: 쿠키는 없고 공개 링크만 아는 사람 ────────────────────
+    // 재발급 뒤에 다시 읽는다 — 화면 상태가 아니라 DB가 가진 현재 토큰을 받기 위해 재진입한다.
     await op.goto(`/groups/${fx.gidA}/settings`);
     const publicLocator = op.getByTestId('public-link');
     await expect(publicLocator).toContainText(`${ORIGIN}/g/`);
     publicUrl = (await publicLocator.innerText()).trim();
+    expect(publicUrl, '재발급 뒤에도 옛 공개 링크가 그대로다').not.toBe(publicBefore);
     publicVisitorCtx = await newClientContext(browser);
 
     // ── 소재 id 회수 ──────────────────────────────────────────────────────
@@ -316,23 +419,27 @@ test.describe('인가 매트릭스', () => {
         'unmarkPaid',
         { groupId: fx.gidA, roundId: fx.roundIdA, membershipId: fx.ownerMembershipA },
       ],
+      // 재발급 2종 — 입력은 groupId 하나다. 거부가 새면 **옛 링크가 죽는다**(행이 아니라 값이
+      // 바뀌는 쓰기), 그래서 writeCounts가 토큰 값까지 들고 있다.
+      ['regenerateInviteToken', { groupId: fx.gidA }],
+      ['regeneratePublicToken', { groupId: fx.gidA }],
     ] as const satisfies readonly (readonly [ActionName, unknown])[];
 
-  test('멤버(총무 아님)는 쓰기 액션 5종 전부 FORBIDDEN이고 아무것도 쓰이지 않는다', async () => {
+  test('멤버(총무 아님)는 쓰기 액션 7종 전부 FORBIDDEN이고 아무것도 쓰이지 않는다', async () => {
     const baseline = await writeCounts();
     for (const [action, input] of validInputs()) {
       await expectDenied(memberCtx, action, input, 'FORBIDDEN', baseline);
     }
   });
 
-  test('비멤버는 쓰기 액션 5종 전부 NOT_MEMBER다 — 모임의 존재 여부도 알려주지 않는다', async () => {
+  test('비멤버는 쓰기 액션 7종 전부 NOT_MEMBER다 — 모임의 존재 여부도 알려주지 않는다', async () => {
     const baseline = await writeCounts();
     for (const [action, input] of validInputs()) {
       await expectDenied(outsiderCtx, action, input, 'NOT_MEMBER', baseline);
     }
   });
 
-  test('미인증은 쓰기 액션 5종 전부 UNAUTHENTICATED다', async () => {
+  test('미인증은 쓰기 액션 7종 전부 UNAUTHENTICATED다', async () => {
     const baseline = await writeCounts();
     for (const [action, input] of validInputs()) {
       await expectDenied(anonCtx, action, input, 'UNAUTHENTICATED', baseline);
@@ -344,10 +451,10 @@ test.describe('인가 매트릭스', () => {
    *
    * 이 테스트는 두 주장을 한 번에 한다:
    *  1. 이 컨텍스트는 정말로 장부를 **읽을 수 있다**(그래서 이 역할이 실재한다),
-   *  2. 그런데도 쓰기 액션 5종은 전부 UNAUTHENTICATED다 — 토큰이 세션이 되지 않는다.
+   *  2. 그런데도 쓰기 액션 7종은 전부 UNAUTHENTICATED다 — 토큰이 세션이 되지 않는다.
    * 1번이 없으면 "그냥 아무 권한도 없는 컨텍스트"를 시험하는 것이라 anonCtx와 구별되지 않는다.
    */
-  test('공개 장부 링크 보유자는 읽을 수 있어도 쓰기 5종은 전부 UNAUTHENTICATED다', async () => {
+  test('공개 장부 링크 보유자는 읽을 수 있어도 쓰기 7종은 전부 UNAUTHENTICATED다', async () => {
     const page = await publicVisitorCtx.newPage();
     expect(await publicVisitorCtx.cookies(), '공개 방문자에게 쿠키가 있다').toEqual([]);
     await page.goto(publicUrl);
@@ -508,10 +615,13 @@ test.describe('인가 매트릭스', () => {
 
   /**
    * 대조군 — 위 거부들이 "재생이 액션에 도달하지 못해서" 난 것이 아님을 보인다.
-   * 같은 재생 경로·같은 id로 총무 세션이 다섯 액션 모두 성공시키고 원장이 실제로 늘어난다.
+   * 같은 재생 경로·같은 id로 총무 세션이 일곱 액션 모두 성공시키고 원장·토큰이 실제로 변한다.
    * 이 테스트가 없으면 포획한 id가 엉뚱해도 매트릭스 전체가 초록일 수 있다.
+   *
+   * ⚠️ **맨 마지막 테스트여야 한다.** 여기서 공개 토큰을 실제로 돌리므로 그 뒤의 테스트가
+   * `publicUrl`을 쓰면 404를 만난다(describe가 serial이므로 순서는 선언 순서다).
    */
-  test('같은 재생 경로로 총무는 5종 전부 성공한다 (대조군)', async () => {
+  test('같은 재생 경로로 총무는 7종 전부 성공한다 (대조군)', async () => {
     const before = await writeCounts();
 
     await expectAllowed(ownerCtx, 'createExpense', {
@@ -537,14 +647,36 @@ test.describe('인가 매트릭스', () => {
       membershipId: fx.ownerMembershipA,
     });
 
-    const after = await writeCounts();
+    // 재발급 2종 — 액션이 돌려준 새 토큰이 **DB에 실제로 들어갔는지**까지 본다.
+    // 거부 케이스는 "토큰이 안 변했다"를 단언했으므로, 대조군은 그 반대를 보여야 짝이 맞는다.
+    const inviteBody = await expectAllowed(ownerCtx, 'regenerateInviteToken', {
+      groupId: fx.gidA,
+    });
+    const newInvite = /"inviteToken":"([^"]+)"/.exec(inviteBody)![1];
+    const publicBody = await expectAllowed(ownerCtx, 'regeneratePublicToken', {
+      groupId: fx.gidA,
+    });
+    const newPublic = /"publicToken":"([^"]+)"/.exec(publicBody)![1];
+
+    const { tokens: tokensBefore, ...countsBefore } = before;
+    const { tokens: tokensAfter, ...countsAfter } = await writeCounts();
     // 지출 1 + 정정 1 + 납부 1 + 납부취소 역분개 1 = 원장 4줄. 회차 1개.
     // 납부 기록은 체크로 생기고 취소로 지워지므로 순증 0 — ADR-001의 "원장은 지우지 않는다"가
     // dues_payments와 원장에서 각각 다르게 나타난다는 것까지 이 숫자가 담고 있다.
-    expect(after).toEqual({
-      entries: before.entries + 4,
-      payments: before.payments,
-      rounds: before.rounds + 1,
+    expect(countsAfter).toEqual({
+      entries: countsBefore.entries + 4,
+      payments: countsBefore.payments,
+      rounds: countsBefore.rounds + 1,
     });
+    // 토큰은 **달라져야** 한다 — 이 한 줄이 거부 케이스의 `tokens` 동일성 단언이
+    // "애초에 변할 수 없는 값"을 본 것이 아님을 증명한다.
+    expect(tokensAfter, '재발급했는데 토큰이 그대로다').not.toBe(tokensBefore);
+    const [rowA] = (await sql`
+      select invite_token, public_token from groups where id = ${fx.gidA}`) as {
+      invite_token: string;
+      public_token: string;
+    }[];
+    expect(rowA.invite_token, '액션이 돌려준 초대 토큰이 DB에 없다').toBe(newInvite);
+    expect(rowA.public_token, '액션이 돌려준 공개 토큰이 DB에 없다').toBe(newPublic);
   });
 });

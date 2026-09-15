@@ -89,19 +89,23 @@ describe('테스트 정리 목록', () => {
   it('스키마의 모든 테이블을 덮는다 — 목록이 스키마에서 파생되므로 테이블 추가를 놓칠 수 없다', () => {
     // 이 단언은 "손으로 적은 목록이 낡는" Plan 03 규칙 5의 함정을 구조적으로 닫았다는 증거다.
     // 테이블을 추가하면 이 배열이 자동으로 늘어난다 — 여기서 기대치를 함께 고치게 된다.
+    //
+    // 값이 완성된 식별자인 이유는 db-guard.ts에 적혀 있다: 이 목록은 이름만이 아니라 **스키마도**
+    // 고정한다. 그래서 public 밖(예: 센티널이 사는 e2e_guard)의 테이블이 스키마 모듈에 섞여
+    // 들어오면 TRUNCATE 대상이 조용히 바뀌는 대신 이 단언이 빨개진다.
     expect(TEST_TABLES).toEqual([
-      'account',
-      'dues_payments',
-      'dues_rounds',
-      'groups',
-      'ledger_entries',
-      'memberships',
-      'session',
-      'settlement_participants',
-      'settlement_transfers',
-      'settlements',
-      'user',
-      'verification',
+      '"public"."account"',
+      '"public"."dues_payments"',
+      '"public"."dues_rounds"',
+      '"public"."groups"',
+      '"public"."ledger_entries"',
+      '"public"."memberships"',
+      '"public"."session"',
+      '"public"."settlement_participants"',
+      '"public"."settlement_transfers"',
+      '"public"."settlements"',
+      '"public"."user"',
+      '"public"."verification"',
     ]);
   });
 });
