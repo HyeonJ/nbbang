@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 
 /**
  * E2E 전 테스트 DB 준비.
- * - 스키마 동기화: drizzle-kit push (drizzle.config.ts가 process.env.DATABASE_URL 사용)
+ * - 스키마 동기화: drizzle-kit migrate (drizzle.config.ts가 process.env.DATABASE_URL 사용)
  * - 데이터 초기화: 앱·인증 테이블 TRUNCATE
  *
  * DATABASE_URL은 playwright.config.ts가 .env.test에서 로드했거나(로컬),
@@ -29,9 +29,9 @@ export default async function globalSetup() {
 
   const sql = neon(url);
 
-  // 1차(주) 안전장치: 센티널 테이블. drizzle-kit push가 절대 만들지 않는 마커라서
+  // 1차(주) 안전장치: 센티널 테이블. 마이그레이션이 절대 만들지 않는 마커라서
   // URL을 어떤 표기로 적었든 "이 DB가 E2E 전용 브랜치인가"를 DB 자체에 물어본다.
-  // 센티널은 별도 스키마(e2e_guard)에 산다 — push는 public만 관리하므로 이 마커를 볼 수도, 지울 수도 없다.
+  // 센티널은 별도 스키마(e2e_guard)에 산다 — drizzle-kit은 public만 관리하므로 이 마커를 볼 수도, 지울 수도 없다.
   const [{ ok }] = await sql`select to_regclass('e2e_guard.sentinel') is not null as ok`;
   if (!ok) {
     throw new Error(
@@ -48,11 +48,12 @@ export default async function globalSetup() {
     }
   }
 
-  // push는 public 스키마만 관리한다 — e2e_guard.sentinel은 '삭제 대상'에 잡히지 않으므로
-  // drop/재생성 없이 그대로 살아남는다. (센티널이 public에 있던 시절에는 push가 매번 지웠고,
-  // 같은 push에 '생성 대상'이 하나라도 있으면 drizzle-kit이 "새 테이블인가 rename인가"를
-  // 대화형으로 물어 비-TTY(CI)에서 죽었다 — --force도 그 프롬프트는 건너뛰지 못한다.)
-  execSync('npx drizzle-kit push --force', { stdio: 'inherit', env: process.env });
+  // drizzle/*.sql을 순서대로 적용한다 — 적용 이력은 DB의 drizzle.__drizzle_migrations가 갖고
+  // 있으므로 이미 반영된 것은 건너뛴다. 이게 이 프로젝트에서 마이그레이션 경로가 실제로 도는
+  // 유일한 자동 검증 지점이다 — 마이그레이션 누락·오류는 여기서 빨갛게 드러난다.
+  // migrate도 public 스키마만 건드리므로(drizzle-kit의 schemaFilter 기본값) e2e_guard.sentinel은
+  // 그대로 살아남는다.
+  execSync('npx drizzle-kit migrate', { stdio: 'inherit', env: process.env });
 
   // CASCADE가 FK로 딸린 테이블까지 알아서 비우지만, 지워지는 테이블은 이름으로 남겨둔다 —
   // 목록을 읽으면 "E2E가 무엇을 초기화하는지"가 드러나야 한다.
