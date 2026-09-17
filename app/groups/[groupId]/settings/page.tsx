@@ -7,6 +7,7 @@ import { Cell, DataTable, Row } from '@/components/ui/data-table';
 import { GroupTabs } from '@/components/ui/group-tabs';
 import { PageHeader, RoleBadge } from '@/components/ui/page-header';
 import AccountPanel from './account-panel';
+import DeleteGroupPanel from './delete-group-panel';
 import InviteLinkPanel from './invite-link-panel';
 import PublicLinkPanel from './public-link-panel';
 
@@ -73,6 +74,16 @@ export default async function GroupSettingsPage({ params }: { params: Promise<{ 
           {/* 토큰 **하나만** 넘긴다 — group 행을 통째로 넘기면 inviteToken까지 클라이언트 번들의
               직렬화 prop으로 실려 나간다(공개 장부의 유출 테스트가 잡는 것과 같은 계열의 실수). */}
           <PublicLinkPanel groupId={groupId} initialToken={group.publicToken} />
+        </div>
+      </section>
+
+      {/* 위험 구역 — 되돌릴 수 없는 동작만 여기 모은다. 맨 아래에 두어 다른 설정과 섞이지 않게 한다. */}
+      <section className="pt-14">
+        <h2 className="font-display text-[12px] font-bold tracking-[0.14em] text-ink uppercase">
+          위험 구역
+        </h2>
+        <div className="mt-4 border-t-2 border-ink pt-5">
+          <DeleteGroupPanel groupId={groupId} groupName={group.name} />
         </div>
       </section>
     </main>

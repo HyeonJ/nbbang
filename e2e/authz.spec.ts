@@ -33,13 +33,19 @@ import { createGroup, INVITE_JOIN_URL, newClientContext, signUp, testEmail } fro
 const ORIGIN = 'http://localhost:3000';
 
 /**
- * 쓰기 액션 7종. 값은 포획한 Next-Action id.
+ * 쓰기 액션 8종. 값은 포획한 Next-Action id.
  *
- * 뒤의 둘(`regenerate*`)은 원래 이 매트릭스에 없었다 — 포획하려면 총무가 실제로 재발급을 해야
+ * `regenerate*` 둘은 원래 이 매트릭스에 없었다 — 포획하려면 총무가 실제로 재발급을 해야
  * 하고, 그러면 **네 번째 역할이 읽는 공개 링크가 그 자리에서 죽는다**. 순서로 풀었다:
  * 재발급을 먼저 하고 그 뒤에 공개 링크를 읽는다(beforeAll), 성공 대조군은 맨 마지막 테스트다.
  * 이 둘이 빠져 있으면 `assertOwner`를 지나는 액션 중 **링크 재발급만** 인가 회귀 감시 밖에 남는다
  * — 토큰 재발급은 "옛 링크를 죽이는" 쓰기이므로 남이 부를 수 있으면 모임 장부 접근이 끊긴다.
+ *
+ * `deleteGroup`(Plan 04 Task 2)은 그 문제의 **극단**이다: 포획하려면 총무가 실제로 모임을
+ * 지워야 하는데 지워진 모임은 되돌아오지 않는다. 재발급의 해법(순서)을 그대로 쓰되 한 단계 더
+ * 간다 — 포획 전용으로 **버리는 모임 C**를 만들어 그것을 UI로 지우면서 id를 얻고(beforeAll),
+ * 매트릭스 본편은 모임 A를 대상으로 거부를 확인한 뒤, 성공 대조군에서 비로소 A를 지운다.
+ * 그래서 삭제의 성공 대조군은 **파일의 맨 마지막 테스트**다(describe가 serial이라 선언 순서 = 실행 순서).
  */
 type ActionName =
   | 'createExpense'
@@ -48,13 +54,16 @@ type ActionName =
   | 'markPaid'
   | 'unmarkPaid'
   | 'regenerateInviteToken'
-  | 'regeneratePublicToken';
+  | 'regeneratePublicToken'
+  | 'deleteGroup';
 const ids = {} as Record<ActionName, string>;
 
 /** 재생에 쓸 소재 — 모임 A(총무·멤버)와 남의 모임 B. */
 const fx = {
   gidA: '',
   gidB: '',
+  /** `deleteGroup`의 id를 포획하기 위해 만들고 곧바로 UI로 지우는 모임. 소재가 아니라 제물이다. */
+  gidC: '',
   roundIdA: '',
   roundIdB: '',
   /** 정정하지 않고 남겨 둔 A의 지출 — "정상 대상" 자리. */
@@ -80,7 +89,7 @@ let anonCtx: BrowserContext;
  * "읽을 권한이 있는 미인증 방문자"라는 **새로운 종류의 주체**가 나타났고, 그 사람이 읽기에서
  * 쓰기로 넘어갈 수 있는지는 기존 세 역할 중 어느 것도 답하지 않는다.
  * 공개 토큰은 **읽기 전용 베어러**여야 한다 — 쿠키가 아니므로 세션이 되지 않고,
- * 따라서 쓰기 액션 7종은 전부 `UNAUTHENTICATED`로 떨어져야 한다.
+ * 따라서 쓰기 액션 8종은 전부 `UNAUTHENTICATED`로 떨어져야 한다.
  */
 let publicVisitorCtx: BrowserContext;
 /** 그 방문자가 실제로 장부를 **읽을 수 있는** 링크 — 읽기 권한이 있다는 전제가 참이어야 한다. */
@@ -363,6 +372,25 @@ test.describe('인가 매트릭스', () => {
     expect(publicUrl, '재발급 뒤에도 옛 공개 링크가 그대로다').not.toBe(publicBefore);
     publicVisitorCtx = await newClientContext(browser);
 
+    // ── deleteGroup의 id 포획 — **버리는 모임 C**로 ────────────────────────────
+    // 이 포획만 파괴가 되돌아오지 않는다. 그래서 A가 아니라 C를 제물로 쓴다.
+    // 부수 효과로 **설정 화면의 위험 구역 동선 자체**(이름 타이핑 → 활성화 → 삭제 → 목록 복귀)가
+    // 여기서 한 번 실제로 돌아간다 — 매트릭스의 재생은 그 UI를 건너뛰므로 둘 다 필요하다.
+    await op.goto('/groups');
+    fx.gidC = await createGroup(op, '삭제될모임', '민지');
+    await op.goto(`/groups/${fx.gidC}/settings`);
+    const deleteButton = op.getByTestId('delete-group');
+    // 이름을 옮겨 적기 전에는 눌리지 않는다 — 화면 쪽 확인이 실재함을 여기서 본다(판정은 서버가 한다).
+    await expect(deleteButton).toBeDisabled();
+    await op.getByTestId('delete-group-confirm').fill('삭제될모임');
+    await expect(deleteButton).toBeEnabled();
+    ids.deleteGroup = await captureActionId(op, () => deleteButton.click());
+    await expect(op).toHaveURL(/\/groups$/);
+    expect(
+      (await sql`select id from groups where id = ${fx.gidC}`) as { id: string }[],
+      'UI로 지운 모임 C가 DB에 남아 있다',
+    ).toHaveLength(0);
+
     // ── 소재 id 회수 ──────────────────────────────────────────────────────
     const entries = (await sql`
       select id, group_id, type, amount, reversal_of from ledger_entries`) as {
@@ -423,23 +451,27 @@ test.describe('인가 매트릭스', () => {
       // 바뀌는 쓰기), 그래서 writeCounts가 토큰 값까지 들고 있다.
       ['regenerateInviteToken', { groupId: fx.gidA }],
       ['regeneratePublicToken', { groupId: fx.gidA }],
+      // 삭제 — **이름까지 맞는** 입력이다. 거부가 인가에서 나야 하므로 NAME_MISMATCH로 비껴가면
+      // 안 된다. 즉 이 네 역할에 대해서는 "이름을 알아도 못 지운다"를 확인하는 것이다.
+      // 거부가 새면 writeCounts의 세 계수가 전부 0이 되고 tokens가 A를 잃는다 — 가장 크게 보이는 유출.
+      ['deleteGroup', { groupId: fx.gidA, name: '인가모임' }],
     ] as const satisfies readonly (readonly [ActionName, unknown])[];
 
-  test('멤버(총무 아님)는 쓰기 액션 7종 전부 FORBIDDEN이고 아무것도 쓰이지 않는다', async () => {
+  test('멤버(총무 아님)는 쓰기 액션 8종 전부 FORBIDDEN이고 아무것도 쓰이지 않는다', async () => {
     const baseline = await writeCounts();
     for (const [action, input] of validInputs()) {
       await expectDenied(memberCtx, action, input, 'FORBIDDEN', baseline);
     }
   });
 
-  test('비멤버는 쓰기 액션 7종 전부 NOT_MEMBER다 — 모임의 존재 여부도 알려주지 않는다', async () => {
+  test('비멤버는 쓰기 액션 8종 전부 NOT_MEMBER다 — 모임의 존재 여부도 알려주지 않는다', async () => {
     const baseline = await writeCounts();
     for (const [action, input] of validInputs()) {
       await expectDenied(outsiderCtx, action, input, 'NOT_MEMBER', baseline);
     }
   });
 
-  test('미인증은 쓰기 액션 7종 전부 UNAUTHENTICATED다', async () => {
+  test('미인증은 쓰기 액션 8종 전부 UNAUTHENTICATED다', async () => {
     const baseline = await writeCounts();
     for (const [action, input] of validInputs()) {
       await expectDenied(anonCtx, action, input, 'UNAUTHENTICATED', baseline);
@@ -451,10 +483,10 @@ test.describe('인가 매트릭스', () => {
    *
    * 이 테스트는 두 주장을 한 번에 한다:
    *  1. 이 컨텍스트는 정말로 장부를 **읽을 수 있다**(그래서 이 역할이 실재한다),
-   *  2. 그런데도 쓰기 액션 7종은 전부 UNAUTHENTICATED다 — 토큰이 세션이 되지 않는다.
+   *  2. 그런데도 쓰기 액션 8종은 전부 UNAUTHENTICATED다 — 토큰이 세션이 되지 않는다.
    * 1번이 없으면 "그냥 아무 권한도 없는 컨텍스트"를 시험하는 것이라 anonCtx와 구별되지 않는다.
    */
-  test('공개 장부 링크 보유자는 읽을 수 있어도 쓰기 7종은 전부 UNAUTHENTICATED다', async () => {
+  test('공개 장부 링크 보유자는 읽을 수 있어도 쓰기 8종은 전부 UNAUTHENTICATED다', async () => {
     const page = await publicVisitorCtx.newPage();
     expect(await publicVisitorCtx.cookies(), '공개 방문자에게 쿠키가 있다').toEqual([]);
     await page.goto(publicUrl);
@@ -611,6 +643,17 @@ test.describe('인가 매트릭스', () => {
       'PAYMENT_NOT_FOUND',
       baseline,
     );
+    // 이름이 틀린 삭제 — **총무 자신도** 못 지운다. 화면의 타이핑 확인이 연출인 이유가 이것이다:
+    // 진짜 판정은 여기, 잠근 행에서 읽은 이름과의 비교다(ADR-002).
+    await expectDenied(
+      ownerCtx,
+      'deleteGroup',
+      { groupId: fx.gidA, name: '인가모임2' },
+      'NAME_MISMATCH',
+      baseline,
+    );
+    // 공백만 다른 이름은 통과해야 하지만(양쪽 trim), 그 확인은 여기서 하지 않는다 —
+    // 성공하면 모임이 사라져 뒤 테스트가 전부 죽는다. 통합 테스트가 같은 비교를 덮는다.
   });
 
   /**
@@ -618,10 +661,11 @@ test.describe('인가 매트릭스', () => {
    * 같은 재생 경로·같은 id로 총무 세션이 일곱 액션 모두 성공시키고 원장·토큰이 실제로 변한다.
    * 이 테스트가 없으면 포획한 id가 엉뚱해도 매트릭스 전체가 초록일 수 있다.
    *
-   * ⚠️ **맨 마지막 테스트여야 한다.** 여기서 공개 토큰을 실제로 돌리므로 그 뒤의 테스트가
+   * ⚠️ **뒤에서 두 번째 테스트여야 한다.** 여기서 공개 토큰을 실제로 돌리므로 그 뒤의 테스트가
    * `publicUrl`을 쓰면 404를 만난다(describe가 serial이므로 순서는 선언 순서다).
+   * 여덟 번째 액션(`deleteGroup`)의 대조군만 이 뒤에 온다 — 그것은 모임 A를 없애기 때문이다.
    */
-  test('같은 재생 경로로 총무는 7종 전부 성공한다 (대조군)', async () => {
+  test('같은 재생 경로로 총무는 비파괴 7종 전부 성공한다 (대조군)', async () => {
     const before = await writeCounts();
 
     await expectAllowed(ownerCtx, 'createExpense', {
@@ -678,5 +722,67 @@ test.describe('인가 매트릭스', () => {
     }[];
     expect(rowA.invite_token, '액션이 돌려준 초대 토큰이 DB에 없다').toBe(newInvite);
     expect(rowA.public_token, '액션이 돌려준 공개 토큰이 DB에 없다').toBe(newPublic);
+  });
+
+  /**
+   * 여덟 번째 액션의 성공 대조군 — **파괴적이라 맨 마지막이다**.
+   *
+   * 앞의 네 역할은 "이름까지 맞는 입력으로도 못 지운다"를 확인했다. 그 거부들이 인가에서 난
+   * 것임을 보이려면 같은 재생 경로·같은 id로 총무가 **실제로 지워지는** 것을 보여야 한다.
+   * 지워진 A는 돌아오지 않으므로 이 뒤에는 어떤 테스트도 올 수 없다.
+   *
+   * 완전성(= 어떤 테이블도 행을 남기지 않는다)의 주장은 여기 있지 않다 — 그것은
+   * `test/group-delete.integration.test.ts`가 FK 메타데이터와 대조해서 한다. 여기서 보는 것은
+   * **사용자가 체감하는 결과**다: 모임이 사라지고, 공개 링크가 그 자리에서 404가 되고,
+   * 남의 모임 B는 그대로다.
+   */
+  test('총무의 삭제는 성공하고 공개 링크가 그 자리에서 404가 된다 (파괴적 대조군)', async () => {
+    const [{ public_token: token }] = (await sql`
+      select public_token from groups where id = ${fx.gidA}`) as { public_token: string }[];
+    const publicLink = `${ORIGIN}/g/${token}`;
+    // 지우기 전에는 읽힌다 — 이 줄이 없으면 아래 404가 "원래 없던 링크"와 구별되지 않는다.
+    expect((await publicVisitorCtx.request.get(publicLink)).status()).toBe(200);
+
+    // B는 이 스펙에서 **지워지면 안 되는 쪽**이다 — 삭제 전후를 직접 비교한다.
+    // (`writeCounts`는 A와 B를 합쳐 세므로 A가 사라진 뒤에는 이 비교에 쓸 수 없다.)
+    const countB = async () => {
+      const [row] = (await sql`
+        select
+          (select count(*)::int from ledger_entries where group_id = ${fx.gidB}) as entries,
+          (select count(*)::int from dues_rounds    where group_id = ${fx.gidB}) as rounds,
+          (select count(*)::int from memberships    where group_id = ${fx.gidB}) as memberships,
+          (select count(*)::int from groups         where id       = ${fx.gidB}) as groups`) as {
+        entries: number;
+        rounds: number;
+        memberships: number;
+        groups: number;
+      }[];
+      return row;
+    };
+    const beforeB = await countB();
+    expect(beforeB.groups, 'B가 준비되지 않았다 — 비교가 헛돈다').toBe(1);
+
+    await expectAllowed(ownerCtx, 'deleteGroup', { groupId: fx.gidA, name: '인가모임' });
+
+    const [gone] = (await sql`
+      select
+        (select count(*)::int from groups         where id       = ${fx.gidA}) as groups,
+        (select count(*)::int from memberships    where group_id = ${fx.gidA}) as memberships,
+        (select count(*)::int from ledger_entries where group_id = ${fx.gidA}) as entries,
+        (select count(*)::int from dues_rounds    where group_id = ${fx.gidA}) as rounds,
+        (select count(*)::int from dues_payments  where group_id = ${fx.gidA}) as payments`) as {
+      groups: number;
+      memberships: number;
+      entries: number;
+      rounds: number;
+      payments: number;
+    }[];
+    expect(gone).toEqual({ groups: 0, memberships: 0, entries: 0, rounds: 0, payments: 0 });
+
+    // 공개 링크는 재발급을 기다리지 않고 즉시 죽는다 — 토큰이 가리키던 행 자체가 없다.
+    expect((await publicVisitorCtx.request.get(publicLink)).status()).toBe(404);
+
+    // 남의 모임 B는 그대로다 — A를 지우는 삭제가 B까지 쓸어가지 않았다.
+    expect(await countB(), 'A를 지웠는데 B가 줄었다').toEqual(beforeB);
   });
 });

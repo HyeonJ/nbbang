@@ -1,7 +1,8 @@
 'use server';
 import { z } from 'zod';
-import { authActionClient, groupActionClient, assertOwner } from './clients';
+import { ActionError, authActionClient, groupActionClient, assertOwner } from './clients';
 import { db } from '@/lib/db';
+import { deleteGroupRows } from '@/lib/db/delete';
 import { groups, memberships } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { newPublicToken, newToken } from '@/lib/domain/token';
@@ -83,4 +84,53 @@ export const updateGroupAccount = groupActionClient
     // 'page'로는 `/dues`만 무효가 되어 이미 열려 있던 회차 화면이 옛 문구를 계속 보여준다.
     revalidatePath(`/groups/${ctx.groupId}/dues`, 'layout');
     return { accountLabel };
+  });
+
+/**
+ * 모임 완전 삭제 — 총무만. 되돌릴 수 없다.
+ *
+ * ── 트랜잭션 안의 순서가 이 액션의 전부다 ───────────────────────────────────
+ *  1. `select … for update` — **먼저** `groups` 행을 잠근다(외부 리뷰 BLOCKER 3).
+ *     잠금이 없으면 아래 루프가 도는 동안 다른 세션이 같은 모임에 원장·납부를 넣을 수 있고,
+ *     그러면 마지막 `delete from groups`가 그 새 행 때문에 **23503으로 실패하거나 교착**한다.
+ *     이 잠금은 자식 insert가 부모 행에 거는 `FOR KEY SHARE`와 충돌하므로, 경쟁하는 쓰기는
+ *     삭제가 끝날 때까지 **기다렸다가 자기가 실패**한다 — 삭제가 이긴다.
+ *  2. **이름 확인은 그 잠금 뒤, 트랜잭션 안에서** 한다(외부 리뷰 IMPORTANT 11).
+ *     액션 진입 전에 읽은 이름과 비교하면, 읽은 뒤 삭제 전 사이에 이름이 바뀌었을 때
+ *     **사용자가 확인한 적 없는 이름의 모임을 지운다.** 잠근 행에서 읽은 값과 비교해야
+ *     "화면에서 본 그 모임"과 "지워지는 그 모임"이 같아진다.
+ *  3. `deleteGroupRows` — 파괴 목록(`lib/db/delete.ts`) 순서대로.
+ *
+ * 화면의 타이핑 확인은 **연출이다** — 서버 액션은 공개 엔드포인트이므로(ADR-002) 클라이언트가
+ * 통과시킨 것을 서버가 다시 묻는다. `e2e/authz.spec.ts`가 UI를 건너뛴 재생으로 그것을 확인한다.
+ *
+ * 이름 비교는 **양쪽 trim 후 정확 일치**다. 저장된 이름은 trim되지 않으므로(`createGroup`),
+ * 앞뒤 공백이 붙은 모임은 "보이지 않는 글자를 맞춰야 지워지는" 상태가 된다 — 비밀이 아닌
+ * 공백 때문에 삭제가 막히는 것은 방어가 아니라 버그다. "이름을 알아야 한다"는 성질은 그대로다.
+ */
+export const deleteGroup = groupActionClient
+  .inputSchema(z.object({
+    groupId: z.string(),
+    name: z.string().min(1).max(50),
+  }))
+  .action(async ({ parsedInput, ctx }) => {
+    assertOwner(ctx.role);
+
+    await db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select({ name: groups.name })
+        .from(groups)
+        .where(eq(groups.id, ctx.groupId))
+        .limit(1)
+        .for('update');
+      // groupActionClient가 멤버십을 확인했으므로 보통은 도달하지 않는다 —
+      // 같은 모임을 두 번 지우는 요청이 겹칠 때의 자리다.
+      if (!locked) throw new ActionError('GROUP_NOT_FOUND');
+      if (locked.name.trim() !== parsedInput.name.trim()) throw new ActionError('NAME_MISMATCH');
+
+      await deleteGroupRows(tx, ctx.groupId);
+    });
+
+    revalidatePath('/groups');
+    return { deleted: true };
   });
