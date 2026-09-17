@@ -21,10 +21,15 @@ import { PageHeader } from '@/components/ui/page-header';
  * ±59분, 배달이 best effort다. 임계값 1시간 + 최악의 다음 실행 ≈ 26시간이고, 한 번의 실행
  * 누락까지 감안한 정직한 상한이 **48시간**이다(`app/api/cron/cleanup/route.ts`의 계산).
  *
- * ⚠️ **"평문 IP를 저장하지 않는다"고 적지 않는다.** 레이트 리밋 버킷은 HMAC이지만,
- * 로그인 **세션 행**에는 Better Auth가 접속 IP와 User-Agent를 평문으로 적는다
- * (`internal-adapter.mjs`: `ipAddress: getIP(headers, options)`). 실측으로 확인했고
- * (dev DB의 session 27행 전부 `ip_address`·`user_agent`가 채워져 있다) 아래 표에 그대로 적었다.
+ * ⚠️ **세션 IP는 이제 저장하지 않는다 — 그러나 그것은 기본 동작이 아니다.**
+ * Better Auth는 세션을 만들 때 `session` 행에 접속 IP와 User-Agent를 평문으로 적는다
+ * (`internal-adapter.mjs`: `ipAddress: getIP(headers, options)`). Task 4 시점에는 실제로
+ * 그렇게 저장되고 있었고(dev DB의 session 27행 전부 채워져 있었다) 이 페이지도 그 사실을
+ * 그대로 적었다. Task 5에서 `lib/auth.ts`의 `databaseHooks.session.create.before`가 두 값을
+ * `null`로 덮어쓰도록 바꿨다 — 그래서 아래 표에서 '세션 기록' 줄이 사라졌다.
+ * **그 훅을 지우면 수집이 조용히 되살아나고 이 페이지는 거짓이 된다.**
+ * `test/session-privacy.integration.test.ts`가 그 회귀를 잡는다(같은 파일이 반대쪽도 잡는다 —
+ * 공식 스위치 `disableIpTracking`으로 갈아타면 로그인 레이트 리밋이 함께 꺼진다).
  *
  * ⚠️ 외부 리소스를 넣지 않는다 — 공개 장부 푸터에서 이 페이지로 오는 링크가 있으므로,
  * 여기에 원격 폰트·이미지를 붙이면 그 요청의 `Referer`로 장부 토큰이 나갈 표면이 생긴다.
@@ -109,11 +114,6 @@ export default function PrivacyPage() {
           />
           <Line term="세션 쿠키" detail="로그인 상태 유지" value="기본 7일 · 로그아웃·탈퇴 시 무효" />
           <Line
-            term="세션 기록"
-            detail="접속 IP와 브라우저 정보(User-Agent). 로그인 세션마다 한 줄씩 남습니다."
-            value="로그아웃·탈퇴 시 삭제"
-          />
-          <Line
             term="접속 IP의 해시값"
             detail="공개 장부 링크의 남용(반복 자동 수집) 방지"
             value="최대 48시간"
@@ -129,10 +129,12 @@ export default function PrivacyPage() {
             지킬 수 없는 숫자를 적는 것보다 실제 상한을 적는 편이 낫다고 판단했습니다.
           </li>
           <li>
-            <b className="font-bold text-ink">세션 기록</b> — 로그인 세션을 만들 때 인증 라이브러리가 접속
-            IP와 브라우저 정보를 세션 한 줄에 <b className="font-bold text-ink">그대로</b> 함께 적습니다.
-            이 값은 그 세션에만 붙어 있고, 로그아웃하거나 탈퇴하면 세션 줄과 함께 사라집니다. 만료된
-            세션은 더 이상 로그인에 쓰이지 않으며, 그 쿠키로 다시 접근하는 시점에 삭제됩니다.
+            <b className="font-bold text-ink">로그인 기록</b> — 쓰는 인증 라이브러리는 기본 동작으로 세션
+            한 줄에 <b className="font-bold text-ink">접속 IP와 브라우저 정보를 그대로</b> 함께 적습니다.
+            엔빵은 그 두 값을 저장하기 전에 비웁니다 —{' '}
+            <b className="font-bold text-ink">로그인 기록으로 접속 IP를 보관하지 않습니다.</b> 그 값을 쓰는
+            화면(세션 목록·기기 관리)이 없어 보관할 이유가 없다고 판단했습니다. 남용 방지 카운터에 쓰는
+            IP 해시는 이것과 별개이며 위 표에 따로 적었습니다.
           </li>
           <li>
             <b className="font-bold text-ink">쿠키</b> — 로그인 상태 유지 하나에만 씁니다. 광고·분석
@@ -160,7 +162,7 @@ export default function PrivacyPage() {
             <Line term="이름" value="&lsquo;탈퇴한 사용자&rsquo;로 대체" />
             <Line term="프로필 이미지" value="삭제" />
             <Line term="비밀번호 해시" value="삭제" />
-            <Line term="로그인 세션" detail="접속 IP·브라우저 정보를 포함합니다." value="삭제 · 즉시 로그아웃" />
+            <Line term="로그인 세션" value="삭제 · 즉시 로그아웃" />
             <Line term="이메일 인증·비밀번호 재설정 토큰" value="삭제" />
             <Line term="모임 표시 이름" value="&lsquo;탈퇴한 멤버&rsquo;로 대체" />
             <Line term="과거 정산에 굳어 있던 표시 이름" value="&lsquo;탈퇴한 멤버&rsquo;로 대체" />

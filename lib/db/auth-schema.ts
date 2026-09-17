@@ -44,6 +44,15 @@ export const session = pgTable(
     updatedAt: timestamp("updated_at")
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
+    /**
+     * ⚠️ **이 두 컬럼은 비어 있다 — 컬럼이 있다는 것과 값이 들어온다는 것은 다르다.**
+     * Better Auth는 기본 동작으로 여기에 접속 IP와 User-Agent를 평문으로 적지만,
+     * `lib/auth.ts`의 `databaseHooks.session.create.before`가 저장 직전에 `null`로 덮어쓴다
+     * (이 앱에는 두 값을 읽는 코드가 없다 — 세션 목록·기기 관리 화면이 없다).
+     * 컬럼 자체는 남겨 둔다: 지우는 마이그레이션은 DROP이고, 이 레포의 마이그레이션은
+     * 추가 전용이다. 개인정보처리방침도 "보관하지 않는다"로 적혀 있으므로 그 훅을 지우면
+     * 방침이 거짓이 된다 — `test/session-privacy.integration.test.ts`가 잡는다.
+     */
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
     userId: text("user_id")

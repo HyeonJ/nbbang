@@ -1,10 +1,61 @@
-import { betterAuth } from 'better-auth';
+import { betterAuth, type BetterAuthOptions } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { db } from '@/lib/db';
 
-export const auth = betterAuth({
+/**
+ * 설정을 **값으로 내보내는 이유**는 테스트 하나 때문이다.
+ *
+ * 이 파일이 지키는 성질 둘(세션 행에 접속 IP를 적지 않는다 · 로그인 레이트 리밋이 실제로
+ * 발동한다)은 **서로를 무너뜨릴 수 있는 한 쌍**이다(아래 `databaseHooks` 주석). 그런데
+ * `rateLimit.enabled`의 기본값은 `isProduction`이라 테스트 환경에서는 꺼져 있어서, 이
+ * 모듈의 `auth`를 그대로 두드려서는 "제한이 아직 살아 있다"를 확인할 수 없다.
+ * `test/session-privacy.integration.test.ts`는 **이 객체 그대로** `enabled: true`만 얹은
+ * 인스턴스를 만들어 두드린다 — 설정을 테스트가 다시 손으로 적으면 그 테스트는 이 파일이
+ * 아니라 자기 자신을 검사하게 된다.
+ */
+export const authOptions = {
   database: drizzleAdapter(db, { provider: 'pg' }),
   emailAndPassword: { enabled: true },
+
+  /**
+   * 세션 행에 **접속 IP·User-Agent를 적지 않는다.**
+   *
+   * ── 무엇을 막는가 (Task 4 실측) ────────────────────────────────────────────
+   * Better Auth는 세션을 만들 때 `session` 행에 그 둘을 **평문으로** 적는다
+   * (`db/internal-adapter.mjs`: `ipAddress: headers ? getIP(headers, options) || "" : ""`,
+   * `userAgent: headers?.get("user-agent") || ""`). 프로덕션에서는 Vercel이
+   * `x-forwarded-for`를 실제 IP로 덮어쓰므로 **진짜 접속 IP**가 들어간다. 이 앱에는 그
+   * 값을 읽는 코드가 하나도 없다 — 세션 목록·기기 관리 화면이 없기 때문이다. 즉 쓰는
+   * 사람도 볼 사람도 없는 개인정보를 모으고 있었다.
+   *
+   * ── 왜 `advanced.ipAddress.disableIpTracking`이 아닌가 ─────────────────────
+   * 그 플래그는 **같은 스위치로 레이트 리밋까지 끈다.** `@better-auth/core`의 `getIP`가
+   * 플래그를 보고 **가장 먼저 `null`을 돌려주고**(`utils/ip.mjs`), 그러면
+   * `api/rate-limiter/index.mjs:240`의 `if (!ip && disableIpTracking) return null`이
+   * **판정 설정 자체를 버린다.** 호출부(`onRequestRateLimit`)는 `null`이면 그대로 반환하므로
+   * 아래 `customRules`의 가입·로그인 제한이 **조용히 사라진다.** 개인정보를 줄이려고
+   * 미인증 엔드포인트의 유일한 남용 방어를 끄는 것은 교환이 아니라 퇴보다.
+   *
+   * ── 이 훅이 둘을 동시에 지킨다 ─────────────────────────────────────────────
+   * `createSession`은 행을 `createWithHooks(data, 'session', …)`로 쓰고, 그 함수는
+   * `create.before`가 돌려준 `{ data }`를 `{ ...actualData, ...result.data }`로 **덮어쓴다**
+   * (`db/with-hooks.mjs`). 그래서 여기서 두 값을 비우면 DB에는 남지 않는다. 반면 `getIP`는
+   * 건드리지 않았으므로 레이트 리밋은 **그대로 IP별로 판정한다.**
+   *
+   * `''`가 아니라 `null`을 쓴다 — 두 컬럼 모두 nullable이고(`lib/db/auth-schema.ts`,
+   * 코어 스키마도 `z.string().nullish()`), 빈 문자열은 "수집했는데 비어 있었다"로 읽히지만
+   * `null`은 "수집하지 않는다"로 읽힌다. 처리방침도 그렇게 적혀 있다.
+   *
+   * 이 훅을 지우면 `test/session-privacy.integration.test.ts`가 빨개진다. 같은 파일이
+   * 반대 방향도 잡는다 — `disableIpTracking`으로 바꿔 끄면 레이트 리밋 테스트가 빨개진다.
+   */
+  databaseHooks: {
+    session: {
+      create: {
+        before: async () => ({ data: { ipAddress: null, userAgent: null } }),
+      },
+    },
+  },
 
   /**
    * `user.deleted_at`을 **세션 응답에 실어 보내기 위한 선언**이다 (ADR-004).
@@ -73,4 +124,6 @@ export const auth = betterAuth({
       '/sign-in/email': { window: 60, max: 8 },
     },
   },
-});
+} satisfies BetterAuthOptions;
+
+export const auth = betterAuth(authOptions);
