@@ -25,12 +25,35 @@ let contextSeq = 0;
  * 헤더를 넣는 건 제한을 끄는 우회가 아니라 **테스트를 실제 배포 형태에 맞추는 것**이다 —
  * 레이트리밋은 켜진 채로 남는다.
  *
+ * ⚠️ 정정(2026-09-17, Plan 04 Task 1 Step 1 실측): 위 문단의 "`next start`가 소켓 주소로
+ * `x-forwarded-for`를 스스로 채운다"는 **클라이언트가 XFF를 보내지 않았을 때만** 맞다.
+ * 보냈으면 `next start`는 그 값을 바꾸지 않고 그대로 통과시킨다 — 그래서 이 주입이 먹힌다.
+ * 프로덕션(Vercel)은 문서·실측 양쪽으로 클라이언트 XFF를 **덮어쓴다**. 전체 측정 기록은
+ * `lib/client-ip.ts` 머리말에 있다.
+ *
  * 주소는 TEST-NET-1(192.0.2.0/24) — 문서용 예약 대역이라 실주소와 겹치지 않는다.
+ *
+ * ⚠️ **Plan 04 이후로 IP 겹침의 대가가 커졌다.** 전에는 better-auth의 경로별 제한만
+ * 공유했지만, 이제 `/g/`에 IP당 60회/분 제한이 걸려 있다(`middleware.ts`). 워커당 16개
+ * 배정을 넘기면 다른 워커의 대역을 침범해 두 스펙이 **한 레이트 리밋 버킷**을 쓰게 되고,
+ * 그 실패는 "왜인지 모르게 CI에서만 429"로 나타난다. 그래서 조용히 겹치는 대신 여기서 깬다.
+ * (한도를 실제로 넘기는 `e2e/rate-limit.spec.ts`는 이 함수를 쓰지 않고 TEST-NET-3을
+ *  따로 쓴다 — 구조적으로 겹칠 수 없게 해 둔 것이다.)
  */
 export function newClientContext(browser: Browser): Promise<BrowserContext> {
   contextSeq += 1;
+  const octet = WORKER_INDEX * 16 + contextSeq;
+  // 두 상한이 **따로** 깨진다: 컨텍스트가 16개를 넘으면 다음 워커의 대역을 침범하고,
+  // 워커가 15개를 넘으면 옥텟 자체가 255를 넘는다. 워커 수는 기계의 CPU에 따라 변하므로
+  // 후자는 "내 노트북에서는 안 나던" 실패다 — 그래서 둘 다 명시적으로 깬다.
+  if (contextSeq > 16 || octet > 254) {
+    throw new Error(
+      `x-forwarded-for 옥텟 배정이 넘쳤습니다(워커 ${WORKER_INDEX}, 컨텍스트 ${contextSeq} → ${octet}). ` +
+        'e2e/helpers.ts의 배정 폭을 넓히세요 — 조용히 겹치면 두 스펙이 레이트 리밋 버킷을 공유합니다.',
+    );
+  }
   return browser.newContext({
-    extraHTTPHeaders: { 'x-forwarded-for': `192.0.2.${WORKER_INDEX * 16 + contextSeq}` },
+    extraHTTPHeaders: { 'x-forwarded-for': `192.0.2.${octet}` },
   });
 }
 

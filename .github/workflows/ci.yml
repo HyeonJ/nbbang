@@ -72,6 +72,12 @@ jobs:
           DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           BETTER_AUTH_URL: http://localhost:3000
+          # `/g/` 미들웨어의 IP 해시 salt (Plan 04 Task 1). 없으면 미들웨어가 모듈 로드 시점에
+          # 던져 공개 장부가 전부 500이 된다 — e2e가 여기서 통째로 빨개진다.
+          # `check` 잡에는 **넣지 않는다**: 단위 테스트는 salt를 함수 인자로 넘기고
+          # (`lib/client-ip.test.ts`), 환경변수 분기는 env를 직접 지웠다 되돌리며 검사한다.
+          # DB 없이 도는 잡에 시크릿을 늘리지 않는 것이 이 레포의 기존 방침이다.
+          RATE_LIMIT_SALT: ${{ secrets.RATE_LIMIT_SALT }}
       # CI 리포터는 'github'이라 playwright-report/가 생기지 않는다 — 실패 증거는
       # test-results/(trace.zip, error-context.md)에 있다. 둘 다 올린다.
       - uses: actions/upload-artifact@v4

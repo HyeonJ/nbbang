@@ -100,6 +100,9 @@ describe('테스트 정리 목록', () => {
       '"public"."groups"',
       '"public"."ledger_entries"',
       '"public"."memberships"',
+      // Plan 04 Task 1의 레이트 리밋 카운터. TRUNCATE 대상에 들어가야 한다 —
+      // 통합 테스트가 앞 테스트의 카운터를 물려받으면 한도 단언이 조용히 어긋난다.
+      '"public"."rate_limits"',
       '"public"."session"',
       '"public"."settlement_participants"',
       '"public"."settlement_transfers"',

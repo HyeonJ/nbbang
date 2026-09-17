@@ -13,6 +13,33 @@ import { user } from './auth-schema';
 
 export * from './auth-schema';
 
+/**
+ * 공개 장부(`/g/:token`) 레이트 리밋 카운터 — **고정 윈도(fixed window)**.
+ *
+ * `bucket`에는 **IP 평문이 들어가지 않는다.** `lib/client-ip.ts`의
+ * `hashIp`(HMAC-SHA256, 앞 32자 = 128비트)만 들어간다. 이유 두 가지:
+ *  1. 접속 IP는 개인정보다 — 평문으로 보관하면 처리방침에 수집·보관 사실을 적어야 하고,
+ *     DB 유출 시 그대로 사람에 연결된다. HMAC이면 salt 없이는 복원할 수 없다.
+ *  2. 길이가 고정된다 — IPv6 표기 흔들림·비정상 길이 문자열이 PK로 들어와 인덱스를
+ *     팽창시키는 경로가 닫힌다(표기 정규화는 `clientIp`가 먼저 한다).
+ *
+ * ⚠️ **고정 윈도의 한계**: 윈도 경계에서 최대 2배 버스트가 가능하다(창 끝에 60회 +
+ * 창 시작에 60회 = 2초 안에 120회). 이 제한의 목적은 "유출된 링크의 반복 긁기와 함수 호출
+ * 비용 방어"이고 그 목적에는 충분하므로 v1은 고정 윈도로 간다. 정밀한 평활화가 필요해지면
+ * 슬라이딩 윈도(로그 테이블 또는 토큰 버킷)로 바꾼다 — 그때 이 주석을 지운다.
+ *
+ * ⚠️ **인덱스를 일부러 두지 않는다.** 이 테이블의 행 수는 "최근 1분 안에 공개 장부를 연
+ * 서로 다른 IP 수" 규모이고, 유일한 범위 조회는 정리 크론의 일 1회 전체 스캔이다.
+ * 반면 쓰기는 요청마다 일어난다 — `window_start`에 인덱스를 달면 윈도가 리셋되는 update가
+ * HOT 갱신에서 빠져 매번 인덱스를 건드린다. 싼 쪽은 인덱스 없는 일 1회 전체 스캔이다.
+ */
+export const rateLimits = pgTable('rate_limits', {
+  // HMAC 해시에 용도 접두사를 붙인 값 — 같은 IP를 다른 목적으로 제한할 때 버킷이 섞이지 않는다.
+  bucket: text('bucket').primaryKey(),
+  count: integer('count').notNull(),
+  windowStart: timestamp('window_start', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const groups = pgTable('groups', {
   id: text('id').primaryKey(), // crypto.randomUUID()
   name: text('name').notNull(),
