@@ -167,13 +167,21 @@ export default async function PublicLedgerPage({ params }: { params: Promise<{ t
         </div>
       </section>
 
-      <footer className="mt-14 flex items-center justify-between border-t border-hairline pt-5 text-[12px] text-muted">
+      <footer className="mt-14 flex items-center justify-between gap-4 border-t border-hairline pt-5 text-[12px] text-muted">
         <span className="font-display tracking-[0.1em]">NBBANG</span>
-        {/* 제품 유입. 같은 출처라 외부 요청이 아니고, Referrer-Policy: no-referrer가
-            이 클릭에서 토큰 URL이 Referer로 나가는 것을 막는다. */}
-        <Link href="/" className="underline underline-offset-4 hover:text-accent-deep">
-          엔빵으로 만든 장부입니다
-        </Link>
+        {/* 제품 유입과 처리방침. 둘 다 같은 출처라 외부 요청이 아니고, Referrer-Policy: no-referrer가
+            이 클릭에서 토큰 URL이 Referer로 나가는 것을 막는다.
+            ⚠️ 처리방침 페이지(`app/privacy/page.tsx`)에 외부 폰트·이미지를 넣으면 이 링크를 타고 간
+            화면에서 외부 요청이 생긴다 — `e2e/public-ledger.spec.ts`가 그 페이지의 외부 요청 0건도
+            함께 단언한다(리뷰 MINOR 21). */}
+        <span className="flex items-center gap-4">
+          <Link href="/privacy" className="underline underline-offset-4 hover:text-accent-deep">
+            개인정보처리방침
+          </Link>
+          <Link href="/" className="underline underline-offset-4 hover:text-accent-deep">
+            엔빵으로 만든 장부입니다
+          </Link>
+        </span>
       </footer>
     </main>
   );

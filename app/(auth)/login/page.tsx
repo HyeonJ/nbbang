@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { authClient } from '@/lib/auth-client';
 import { authErrorMessage } from '@/lib/auth-errors';
@@ -126,6 +127,24 @@ function LoginForm() {
             {pending ? '처리 중…' : isSignup ? '가입하기' : '로그인'}
           </Button>
         </form>
+
+        {/* 동의 맥락은 가입일 때만 보인다 — 로그인은 이미 동의한 사람의 행동이고, 두 탭에 같은
+            문구를 띄우면 문장이 배경처럼 읽혀 아무도 보지 않는다. 링크는 새 탭으로 연다:
+            여기서 같은 탭으로 나가면 입력하던 이메일·비밀번호가 사라진다. */}
+        {isSignup && (
+          <p className="mt-5 text-[12px] leading-[1.7] text-muted">
+            가입하면{' '}
+            <Link
+              href="/privacy"
+              target="_blank"
+              data-testid="signup-privacy-link"
+              className="text-ink underline underline-offset-4 hover:text-accent-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >
+              개인정보처리방침
+            </Link>
+            에 동의한 것으로 봅니다. 수집하는 항목과 탈퇴 시 지워지는 것·남는 것이 적혀 있습니다.
+          </p>
+        )}
 
         {error && (
           <p role="alert" className="mt-6 border-l-2 border-ink pl-3 text-[13px] leading-[1.7]">

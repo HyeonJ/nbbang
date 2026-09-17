@@ -91,6 +91,30 @@ function expectNoLeaks(html: string, where: string, urlToken?: string) {
   }
 }
 
+/**
+ * 한 화면이 **외부 호스트로 요청을 하나도 보내지 않음**을 단언한다.
+ *
+ * 공개 장부와 처리방침 둘 다 이 규칙을 지켜야 하므로 한 곳에 둔다(리뷰 MINOR 21) —
+ * 두 벌로 베껴 두면 한쪽만 고쳐져 규칙의 절반이 검사되지 않는 상태가 된다.
+ *
+ * `networkidle`까지 기다리는 이유: 폰트·이미지는 초기 HTML 파싱 이후에 붙는 경우가 많아,
+ * `load`에서 끊으면 늦게 나가는 외부 요청을 놓친다.
+ */
+async function expectNoExternalRequests(url: string, where: string) {
+  const page = await anonCtx.newPage();
+  const external: string[] = [];
+  let observed = 0;
+  page.on('request', (r) => {
+    observed += 1;
+    if (new URL(r.url()).origin !== ORIGIN) external.push(r.url());
+  });
+  await page.goto(url, { waitUntil: 'networkidle' });
+  // 요청을 하나도 못 봤다면 "외부 요청 0건"은 관측이 아니라 공백이다 — 그 상태를 통과시키지 않는다.
+  expect(observed, `${where}: 요청을 하나도 관찰하지 못했다 — 검사가 헛돌고 있다`).toBeGreaterThan(0);
+  expect(external, `${where}: 외부 호스트 요청이 있다: ${external.join(', ')}`).toEqual([]);
+  await page.close();
+}
+
 /** 공개 라우트의 응답 헤더 3종. 200이든 404든 똑같이 붙어야 한다. */
 function expectPublicHeaders(headers: Record<string, string>, where: string) {
   // private/no-store의 순서·병기는 Next가 정규화할 수 있으므로 토큰 포함 여부로 본다.
@@ -259,13 +283,44 @@ test.describe('공개 장부 — 링크 하나로 열리되 그 밖의 것은 �
    *  누군가 CDN 폰트·애널리틱스를 붙이는 순간 빨개진다.)
    */
   test('외부 호스트로 요청을 하나도 보내지 않는다', async () => {
+    await expectNoExternalRequests(fx.publicUrl, '공개 장부');
+  });
+
+  /**
+   * **처리방침까지 같은 규칙을 적용한다** (외부 리뷰 MINOR 21).
+   *
+   * 공개 장부 푸터에서 한 번의 클릭으로 닿는 화면이므로, 여기에 원격 폰트·이미지가 붙으면
+   * 그 요청이 장부를 보던 사람의 브라우저에서 나간다. 깨지는 경로는 링크 자체가 아니라
+   * **그 페이지가 외부 리소스를 들이는 것**이다 — 그래서 단언은 링크가 아니라 요청을 센다.
+   */
+  test('처리방침도 외부 호스트로 요청을 하나도 보내지 않는다', async () => {
+    await expectNoExternalRequests(`${ORIGIN}/privacy`, '처리방침');
+  });
+
+  /**
+   * 처리방침은 **로그인 없이** 열려야 한다. 이 화면을 읽어야 하는 사람 중에는 아직 계정이 없는
+   * 사람(가입 직전)과 앞으로도 계정을 만들지 않을 사람(공개 장부만 보는 멤버)이 있다.
+   *
+   * 보관기간 문자열을 함께 못 박는다: 이 숫자는 `app/api/cron/cleanup/route.ts`의 계산에서 나온
+   * 값이고 "24시간"으로 되돌아가기 쉬운 자리다(플랜 초안이 그렇게 적었다). 크론이 하루 한 번만
+   * 돌 수 있는 한 24시간은 지킬 수 없는 약속이므로, 화면에서 그 값을 고정한다.
+   */
+  test('처리방침이 쿠키 없는 방문자에게 200으로 열린다', async () => {
+    const res = await anonCtx.request.get(`${ORIGIN}/privacy`);
+    expect(res.status(), '처리방침이 200이 아니다').toBe(200);
+    const html = await res.text();
+    expect(html, '처리방침 화면이 아니다').toContain('개인정보처리방침');
+    expect(html, 'IP 해시 보관기간이 화면에 없다').toContain('최대 48시간');
+    expect(html, '탈퇴 후에도 남는 것에 대한 고지가 없다').toContain('탈퇴해도 남는 것');
+  });
+
+  /** 인지 경로 — 장부를 보던 사람이 푸터에서 한 번에 닿는다. */
+  test('공개 장부 푸터에서 처리방침으로 이동한다', async () => {
     const page = await anonCtx.newPage();
-    const external: string[] = [];
-    page.on('request', (r) => {
-      if (new URL(r.url()).origin !== ORIGIN) external.push(r.url());
-    });
-    await page.goto(fx.publicUrl, { waitUntil: 'networkidle' });
-    expect(external, `외부 호스트 요청이 있다: ${external.join(', ')}`).toEqual([]);
+    await page.goto(fx.publicUrl);
+    await page.getByRole('link', { name: '개인정보처리방침' }).click();
+    await expect(page).toHaveURL(`${ORIGIN}/privacy`);
+    await expect(page.getByTestId('page-title')).toHaveText('개인정보처리방침');
     await page.close();
   });
 
@@ -299,6 +354,17 @@ test.describe('공개 장부 — 링크 하나로 열리되 그 밖의 것은 �
     expect((await anonCtx.request.get(oldUrl)).status(), '재발급 전 옛 링크가 200이 아니다').toBe(200);
 
     await ownerPage.goto(`/groups/${fx.groupId}/settings`);
+    /**
+     * 노출 고지가 **재발급 버튼 위에** 있다(리뷰 IMPORTANT 16). 위치까지 보는 이유:
+     * 버튼 아래로 내려가면 "복사 → 공유"가 끝난 뒤에 읽히는 사후 통보가 된다.
+     */
+    const notice = ownerPage.getByTestId('public-link-notice');
+    await expect(notice).toContainText('로그인 없이');
+    await expect(notice).toContainText('즉시');
+    const noticeBox = (await notice.boundingBox())!;
+    const buttonBox = (await ownerPage.getByTestId('public-regenerate').boundingBox())!;
+    expect(noticeBox.y, '노출 고지가 재발급 버튼보다 아래에 있다').toBeLessThan(buttonBox.y);
+
     await ownerPage.getByTestId('public-regenerate').click();
     await expect(ownerPage.getByTestId('public-link')).not.toHaveText(oldUrl);
 

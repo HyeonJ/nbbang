@@ -63,16 +63,21 @@ export default function Home() {
         </p>
       </section>
 
-      <footer className="mt-14 flex items-center justify-between border-t border-hairline pt-5 text-[12px] text-muted">
+      <footer className="mt-14 flex items-center justify-between gap-4 border-t border-hairline pt-5 text-[12px] text-muted">
         <span className="font-display tracking-[0.1em]">NBBANG</span>
-        <a
-          href="https://github.com/HyeonJ/nbbang"
-          target="_blank"
-          rel="noopener"
-          className="underline underline-offset-4 hover:text-accent-deep"
-        >
-          GitHub
-        </a>
+        <span className="flex items-center gap-4">
+          <Link href="/privacy" className="underline underline-offset-4 hover:text-accent-deep">
+            개인정보처리방침
+          </Link>
+          <a
+            href="https://github.com/HyeonJ/nbbang"
+            target="_blank"
+            rel="noopener"
+            className="underline underline-offset-4 hover:text-accent-deep"
+          >
+            GitHub
+          </a>
+        </span>
       </footer>
     </main>
   );

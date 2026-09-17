@@ -10,9 +10,21 @@ export function DataTable({ children, className = '' }: { children: ReactNode; c
   );
 }
 
-export function Row({ children, testId }: { children: ReactNode; testId?: string }) {
+/**
+ * `className`은 좁은 화면에서 행을 쌓기 위한 것이다(`block sm:table-row`) — 표의 두 열이
+ * 390px에서 서로를 짓눌러 오른쪽 칸이 한 단어씩 끊어지는 것을 막는다. 기본값은 그대로다.
+ */
+export function Row({
+  children,
+  testId,
+  className = '',
+}: {
+  children: ReactNode;
+  testId?: string;
+  className?: string;
+}) {
   return (
-    <tr className="border-b border-hairline" data-testid={testId}>
+    <tr className={`border-b border-hairline ${className}`} data-testid={testId}>
       {children}
     </tr>
   );
