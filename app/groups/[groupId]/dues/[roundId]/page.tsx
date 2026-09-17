@@ -1,7 +1,6 @@
-import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { auth } from '@/lib/auth';
+import { getActiveSession } from '@/lib/session';
 import {
   getGroupForMember,
   getGroupMembers,
@@ -29,7 +28,7 @@ export default async function RoundPage({
 }) {
   const { groupId, roundId } = await params;
 
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getActiveSession();
   if (!session) redirect(`/login?next=/groups/${groupId}/dues/${roundId}`);
 
   const found = await getGroupForMember(groupId, session.user.id);

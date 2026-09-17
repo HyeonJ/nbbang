@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { groupActionClient, assertOwner, ActionError } from './clients';
 import { revalidateLedger } from './revalidate';
 import { db } from '@/lib/db';
+import { assertActiveUser } from '@/lib/db/anonymize';
 import { isUniqueViolation } from '@/lib/db/errors';
 import { getRound } from '@/lib/db/queries';
 import { duesPayments, duesRounds, ledgerEntries, memberships } from '@/lib/db/schema';
@@ -89,6 +90,7 @@ export const markPaid = groupActionClient
     const entryId = crypto.randomUUID();
     try {
       await db.transaction(async (tx) => {
+        await assertActiveUser(tx, ctx.userId);
         await tx.insert(ledgerEntries).values({
           id: entryId,
           groupId: ctx.groupId,
@@ -167,6 +169,7 @@ export const unmarkPaid = groupActionClient
 
     try {
       await db.transaction(async (tx) => {
+        await assertActiveUser(tx, ctx.userId);
         await tx.insert(ledgerEntries).values({
           id: crypto.randomUUID(),
           groupId: ctx.groupId,

@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { authActionClient, ActionError } from './clients';
 import { db } from '@/lib/db';
+import { assertActiveUser } from '@/lib/db/anonymize';
 import { isUniqueViolation } from '@/lib/db/errors';
 import { groups, memberships } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
@@ -19,9 +20,14 @@ export const joinByInvite = authActionClient
     });
     if (dup) return { groupId: group.id, already: true };
     try {
-      await db.insert(memberships).values({
-        id: crypto.randomUUID(), userId: ctx.userId, groupId: group.id,
-        role: 'member', displayName: parsedInput.displayName,
+      // 합류도 `memberships.user_id`에 사용자 id를 **기록하는** 쓰기다 — 탈퇴 확인이 이
+      // insert와 같은 트랜잭션 안에 있어야 한다(ADR-004 동시성).
+      await db.transaction(async (tx) => {
+        await assertActiveUser(tx, ctx.userId);
+        await tx.insert(memberships).values({
+          id: crypto.randomUUID(), userId: ctx.userId, groupId: group.id,
+          role: 'member', displayName: parsedInput.displayName,
+        });
       });
     } catch (e) {
       // 동시 합류 레이스: 유니크 인덱스(memberships_user_group)가 최종 방어선.

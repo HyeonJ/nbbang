@@ -1,8 +1,7 @@
 import Link from 'next/link';
-import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
-import { auth } from '@/lib/auth';
+import { getActiveSession } from '@/lib/session';
 import { db } from '@/lib/db';
 import { groups, memberships } from '@/lib/db/schema';
 import { formatDateKst } from '@/lib/format';
@@ -10,7 +9,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import NewGroupForm from './new-group-form';
 
 export default async function GroupsPage() {
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getActiveSession();
   if (!session) redirect('/login?next=/groups');
 
   const myGroups = await db
@@ -30,9 +29,21 @@ export default async function GroupsPage() {
         back="/"
         title="내 모임"
         right={
-          <span className="num text-[15px] text-ink">
-            {myGroups.length}
-            <span className="text-[12px] font-medium">개</span>
+          <span className="flex items-baseline gap-4">
+            <span className="num text-[15px] text-ink">
+              {myGroups.length}
+              <span className="text-[12px] font-medium">개</span>
+            </span>
+            {/* 계정 설정으로 가는 **유일한** 입구다. 탈퇴는 여기서만 닿을 수 있어야 하고
+                (되돌릴 수 없는 동작을 여러 경로에 두지 않는다), 로그인한 사람이 반드시
+                지나는 화면이 이 목록이다. */}
+            <Link
+              href="/account"
+              data-testid="account-link"
+              className="font-display text-[11px] font-bold tracking-[0.14em] text-muted uppercase underline underline-offset-4 hover:text-accent-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >
+              계정
+            </Link>
           </span>
         }
       />

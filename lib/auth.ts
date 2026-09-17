@@ -7,6 +7,29 @@ export const auth = betterAuth({
   emailAndPassword: { enabled: true },
 
   /**
+   * `user.deleted_at`을 **세션 응답에 실어 보내기 위한 선언**이다 (ADR-004).
+   *
+   * 어댑터는 `db.select().from(user)`로 행 전체를 읽지만, `parseUserOutput`이 **스키마에
+   * 선언된 필드만** 남기고 나머지를 버린다. 그래서 이 선언이 없으면 `getSession`이 돌려주는
+   * 사용자 객체에 `deletedAt`이 **조용히 없어지고**, `lib/session.ts`의 탈퇴 차단은
+   * `undefined`를 보며 항상 통과한다 — 테스트가 없으면 아무도 모르는 종류의 실패다.
+   * (`test/account-delete.integration.test.ts`가 그 상태를 강제로 만들어 확인한다.)
+   *
+   * 이 방식을 택한 이유: 판정에 **추가 왕복이 없다.** 대안은 세션을 해석할 때마다
+   * `select deleted_at from "user"`를 한 번 더 도는 것인데, 인증된 페이지마다 Neon 왕복이
+   * 하나씩 붙는다. 어차피 어댑터가 이미 읽어 온 행에 들어 있는 값이다.
+   *
+   * `input: false` — 가입·프로필 수정 입력으로 이 값을 **설정할 수 없다.** 없으면 클라이언트가
+   * 보낸 `deletedAt`이 그대로 저장돼 자기 계정을 탈퇴 상태로 만들거나(자물쇠 아님) 되돌릴 수 있다.
+   * 파기의 유일한 쓰기 경로는 `actions/account.ts`의 `deleteAccount`다.
+   */
+  user: {
+    additionalFields: {
+      deletedAt: { type: 'date', required: false, input: false },
+    },
+  },
+
+  /**
    * 레이트리밋 — **끄지 않는다.** 가입·로그인은 미인증 엔드포인트라 남용 방지가 필요하다.
    * 여기서 고치는 건 하나뿐이다: 기본값이 이 제품의 **정상 동선**을 막는다는 것.
    *

@@ -1,7 +1,6 @@
 import Link from 'next/link';
-import { headers } from 'next/headers';
 import { eq } from 'drizzle-orm';
-import { auth } from '@/lib/auth';
+import { getActiveSession } from '@/lib/session';
 import { db } from '@/lib/db';
 import { groups } from '@/lib/db/schema';
 import { PageHeader } from '@/components/ui/page-header';
@@ -32,7 +31,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
     );
   }
 
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getActiveSession();
 
   return (
     <main className="mx-auto max-w-3xl px-5 pb-20">

@@ -4,6 +4,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { groupActionClient, assertOwner, ActionError } from './clients';
 import { db } from '@/lib/db';
+import { assertActiveUser } from '@/lib/db/anonymize';
 import {
   memberships,
   settlements,
@@ -122,6 +123,7 @@ export const createSettlement = groupActionClient
     // 머리말·참여자·이체는 함께여야 뜻이 있다 — 참여자 없는 정산이나 합계가 어긋난 이체 목록은
     // 스냅샷이 아니라 손상된 기록이다. 한 트랜잭션으로 묶는다.
     await db.transaction(async (tx) => {
+      await assertActiveUser(tx, ctx.userId);
       await tx.insert(settlements).values({
         id: settlementId,
         groupId: ctx.groupId,

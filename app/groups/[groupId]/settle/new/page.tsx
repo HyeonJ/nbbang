@@ -1,6 +1,5 @@
-import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
-import { auth } from '@/lib/auth';
+import { getActiveSession } from '@/lib/session';
 import { getGroupForMember, getGroupMembers } from '@/lib/db/queries';
 import { formatDateKst } from '@/lib/format';
 import { GroupTabs } from '@/components/ui/group-tabs';
@@ -21,7 +20,7 @@ export default async function NewSettlementPage({
 }) {
   const { groupId } = await params;
 
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getActiveSession();
   if (!session) redirect(`/login?next=/groups/${groupId}/settle/new`);
 
   const found = await getGroupForMember(groupId, session.user.id);

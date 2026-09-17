@@ -1,6 +1,5 @@
-import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
-import { auth } from '@/lib/auth';
+import { getActiveSession } from '@/lib/session';
 import { getGroupForMember, getGroupMembers } from '@/lib/db/queries';
 import { formatDateKst } from '@/lib/format';
 import { Cell, DataTable, Row } from '@/components/ui/data-table';
@@ -14,7 +13,7 @@ import PublicLinkPanel from './public-link-panel';
 export default async function GroupSettingsPage({ params }: { params: Promise<{ groupId: string }> }) {
   const { groupId } = await params;
 
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getActiveSession();
   if (!session) redirect(`/login?next=/groups/${groupId}/settings`);
 
   const found = await getGroupForMember(groupId, session.user.id);

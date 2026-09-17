@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { ActionError, authActionClient, groupActionClient, assertOwner } from './clients';
 import { db } from '@/lib/db';
+import { assertActiveUser } from '@/lib/db/anonymize';
 import { deleteGroupRows } from '@/lib/db/delete';
 import { groups, memberships } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -16,6 +17,7 @@ export const createGroup = authActionClient
   .action(async ({ parsedInput, ctx }) => {
     const groupId = crypto.randomUUID();
     await db.transaction(async (tx) => {
+      await assertActiveUser(tx, ctx.userId);
       await tx.insert(groups).values({
         id: groupId, name: parsedInput.name,
         // 초대 토큰은 72비트, 공개 장부 토큰은 128비트 — 두 링크의 위험이 다르다(token.ts 주석).

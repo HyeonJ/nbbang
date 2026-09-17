@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { groupActionClient, assertOwner, ActionError } from './clients';
 import { revalidateLedger } from './revalidate';
 import { db } from '@/lib/db';
+import { assertActiveUser } from '@/lib/db/anonymize';
 import { isUniqueViolation } from '@/lib/db/errors';
 import { ledgerEntries } from '@/lib/db/schema';
 import {
@@ -33,16 +34,21 @@ export const createExpense = groupActionClient
     }
     // 입력은 KST 날짜(YYYY-MM-DD) — 그날 정오(UTC 03:00)로 저장해 시간대 경계에서 날짜가 밀리지 않게 한다.
     const occurredAt = new Date(`${parsedInput.occurredOn}T03:00:00.000Z`);
-    await db.insert(ledgerEntries).values({
-      id: crypto.randomUUID(),
-      groupId: ctx.groupId,
-      type: 'EXPENSE',
-      amount,
-      occurredAt,
-      category: parsedInput.category || null,
-      memo: parsedInput.memo || null,
-      createdBy: ctx.userId,
-      reversalOf: null,
+    // insert 하나뿐인데 트랜잭션을 여는 이유는 `assertActiveUser` 때문이다 — 탈퇴 확인이
+    // 쓰기와 **같은 트랜잭션 안**에 있어야 창이 닫힌다(외부 리뷰 IMPORTANT 12, ADR-004).
+    await db.transaction(async (tx) => {
+      await assertActiveUser(tx, ctx.userId);
+      await tx.insert(ledgerEntries).values({
+        id: crypto.randomUUID(),
+        groupId: ctx.groupId,
+        type: 'EXPENSE',
+        amount,
+        occurredAt,
+        category: parsedInput.category || null,
+        memo: parsedInput.memo || null,
+        createdBy: ctx.userId,
+        reversalOf: null,
+      });
     });
     revalidateLedger(ctx.groupId);
     return { ok: true };
@@ -79,16 +85,19 @@ export const reverseEntry = groupActionClient
       throw new ActionError(e.code);
     }
     try {
-      await db.insert(ledgerEntries).values({
-        id: crypto.randomUUID(),
-        groupId: ctx.groupId,
-        type: 'REVERSAL',
-        amount: reversalAmount(target),
-        occurredAt: new Date(),
-        category: null,
-        memo: `정정: ${parsedInput.entryId.slice(0, 8)}`,
-        createdBy: ctx.userId,
-        reversalOf: target.id,
+      await db.transaction(async (tx) => {
+        await assertActiveUser(tx, ctx.userId);
+        await tx.insert(ledgerEntries).values({
+          id: crypto.randomUUID(),
+          groupId: ctx.groupId,
+          type: 'REVERSAL',
+          amount: reversalAmount(target),
+          occurredAt: new Date(),
+          category: null,
+          memo: `정정: ${parsedInput.entryId.slice(0, 8)}`,
+          createdBy: ctx.userId,
+          reversalOf: target.id,
+        });
       });
     } catch (e) {
       // 위 검증은 읽고 쓰는 사이에 트랜잭션이 없다 — 총무 둘이 같은 행의 '정정'을 동시에 누르면

@@ -419,9 +419,9 @@ returning count,
 
 **총무는 탈퇴할 수 없다** — 소유한 모임이 있으면 거부한다. 에러 문구는 이유를 설명한다: "소유한 모임을 먼저 삭제해 주세요. 총무를 다른 멤버에게 넘기는 기능은 아직 없습니다." **총무 위임이 제품상 미결이라는 사실을 ADR에도 적는다**(리뷰 MINOR 23).
 
-- [ ] **Step 1: ADR-004 작성 · 커밋** (구현 전에)
+- [x] **Step 1: ADR-004 작성 · 커밋** (구현 전에)
 
-- [ ] **Step 2: 실패 테스트**
+- [x] **Step 2: 실패 테스트**
 
 1. 멤버 탈퇴 → `user` 이메일·이름 익명화, `account`·`session`·`verification` 0행
 2. **모임 잔액 불변, 원장 행 수 불변** (ADR-001)
@@ -433,15 +433,158 @@ returning count,
 8. 탈퇴 후 기존 세션 쿠키로 접근 → 인증 실패
 9. **동시성**(리뷰 IMPORTANT 12): 탈퇴 트랜잭션과 원장 생성이 겹칠 때 `deletedAt`이 찍힌 사용자로 새 엔트리가 생기지 않는다. 탈퇴 시 `user` 행을 잠그고, 쓰기 인가 계층이 **쓰기 직전에도** `deletedAt is null`을 확인한다.
 
-- [ ] **Step 3: 실패 확인 → Step 4: 구현 → Step 5: 통과 확인**
+- [x] **Step 3: 실패 확인 → Step 4: 구현 → Step 5: 통과 확인**
 
 Better Auth의 `deleteUser`는 **쓰지 않는다** — 하드 삭제라 FK 셋을 깬다. 이 사실을 주석에 남긴다. 차단은 앱 미들웨어가 아니라 **세션을 해석하는 공통 auth 계층**에서 한다(리뷰 IMPORTANT 14) — 미들웨어만 막으면 서버 액션의 auth 헬퍼와 불일치한다.
 
-- [ ] **Step 6: 변이 증명** — `memberships.displayName` 익명화를 끄면 5번이, `account` 삭제를 끄면 5번/8번이 빨개지는지 확인·되돌림·보고.
+- [x] **Step 6: 변이 증명** — `memberships.displayName` 익명화를 끄면 5번이, `account` 삭제를 끄면 5번/8번이 빨개지는지 확인·되돌림·보고.
 
-- [ ] **Step 7: 화면** — 계정 설정 위험 구역. `탈퇴합니다` 타이핑 → 서버 재확인. testid `delete-account`, `delete-account-confirm`.
+- [x] **Step 7: 화면** — 계정 설정 위험 구역. `탈퇴합니다` 타이핑 → 서버 재확인. testid `delete-account`, `delete-account-confirm`.
 
-- [ ] **Step 8: 게이트 + 커밋**
+- [x] **Step 8: 게이트 + 커밋**
+
+> **구현 노트(2026-09-17) — 실측 결과와 플랜에서 벗어난 곳 (규칙 1·3·4):**
+>
+> **1. 플랜의 사실 전제는 이번엔 전부 맞았다 — 다만 넷을 실측으로 닫았다.** Task 1·2와 달리
+> 이 태스크의 표(파기 대상)는 고칠 곳이 없었다. 확인한 것:
+> · `memberships.userId`·`ledger_entries.created_by`·`settlements.created_by` 셋 다 `notNull` ✓
+> · `settlement_participants.membershipId` 존재 ✓ (리뷰 BLOCKER 4의 "스키마 변경이 필요할 수
+>   있다"는 전제는 역시 사실과 달랐다)
+> · Better Auth 테이블은 `user`·`session`·`account`·`verification` 넷 ✓
+> · **재가입**: 이메일을 비우면 200으로 가입되고 **새 `user.id`** 를 받는다. 비우지 않으면
+>   `422 USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` — 즉 이메일 재작성은 장식이 아니라
+>   재가입의 **유일한** 조건이다(둘 다 실측, 통합 테스트가 양쪽을 고정).
+>
+> **2. ⚠️ Self-Review 가정 6이 여기서 닫힌다 — 그리고 답은 "아무 반응도 하지 않는다"였다.**
+> `user` 행을 직접 UPDATE해 `deleted_at`을 찍고 **세션 행은 살려 둔 채** `getSession`을 부르면
+> Better Auth는 세션을 **그대로 돌려준다**. "비활성 사용자"라는 개념이 없다. 그러므로 차단은
+> 전적으로 앱의 몫이고, 그 사실을 모른 채 "세션 행을 지우니까 됐다"로 끝냈다면 두 번째
+> 방어선이 없는 상태로 남았을 것이다. 통합 테스트 8번이 **그 상태를 강제로 만들어**
+> (유령 계정: `deleted_at` 있음 + 세션 행 살아 있음) 확인한다 — 먼저 `auth.api.getSession`이
+> 세션을 돌려주는 것을 단언하고(= 이 검사가 헛돌지 않음을 증명), 그 다음 `getActiveSession`이
+> `null`을 돌려주는 것을 단언한다.
+>
+> **3. `deleted_at`은 Better Auth `user.additionalFields`로 선언한다 — 추가 왕복 0.**
+> 어댑터는 `db.select().from(user)`로 행 **전체**를 읽지만 `parseUserOutput`이 **스키마에
+> 선언된 필드만** 남긴다(`db/schema.mjs`의 `filterOutputFields`). 그래서 선언이 없으면 값이
+> 조용히 사라지고 차단은 **항상 통과**한다. 대안(세션 해석마다 `select deleted_at` 한 번 더)은
+> 인증된 페이지마다 Neon 왕복이 하나씩 붙는다. `input: false`로 가입 입력으로는 못 넣게 했다.
+>
+> **4. 차단 지점은 `lib/session.ts`의 `getActiveSession()` 하나다**(리뷰 IMPORTANT 14).
+> 미들웨어 매처는 `/g/:path*`라 액션 POST도 `/groups/*`도 지나지 않는다 — 거기서 막으면
+> 인증 판정이 둘이 되고 그 둘이 어긋나는 날 조용히 뚫린다. `auth.api.getSession`을 부르던
+> **12곳**(페이지 9 · 초대 페이지 · CSV 라우트 · `actions/clients.ts`)을 전부 이 함수로 바꿨고,
+> 이제 그 API를 직접 부르는 파일은 `lib/session.ts` 하나다. 부수 효과로 `headers()` 호출도
+> 한 곳으로 모였다.
+>
+> **5. 동시성은 `for update`(탈퇴) ↔ `for key share`(쓰기) 한 쌍으로 닫았다**(리뷰 IMPORTANT 12).
+> 세션 검사만으로는 부족하다 — 그것은 액션 **시작 시점의 한 번**이고, "세션 확인은 탈퇴 잠금
+> 직전에 끝나고 insert는 커밋 이후에 도는" 배치가 남는다. 확인이 쓰기와 **같은 트랜잭션 안**에
+> 있어야 그 창이 닫힌다. `FOR KEY SHARE`는 `FOR UPDATE`와 충돌하므로 탈퇴 중인 쓰기는
+> **기다렸다가** 커밋 이후 행 버전을 읽고 스스로 거절한다.
+> 그래서 `createExpense`·`joinByInvite`는 insert 하나뿐인데도 **트랜잭션을 열게 됐다**(왕복 2개 추가).
+> 거는 범위는 `user.id`를 **기록하는** 쓰기 7종뿐이다(`created_by`·`user_id`):
+> `createExpense`·`reverseEntry`·`markPaid`·`unmarkPaid`·`createSettlement`·`createGroup`·`joinByInvite`.
+> 나머지(토큰 재발급·계좌 문구·모임 삭제)는 총무 전용인데 총무는 애초에 탈퇴할 수 없다 —
+> 근거 없이 넓히면 모든 쓰기에 왕복이 붙는다.
+> `UserDeletedError` → `ACCOUNT_DELETED` 번역은 `actionClient.handleServerError` **한 곳**에서
+> 한다. 액션 7곳이 각자 try/catch를 들면 그중 하나를 빠뜨리는 것이 이 방어가 죽는 경로가 된다.
+>
+> **6. 동시성 테스트는 두 방향을 따로 본다 — 한쪽만 보면 반대쪽이 열린 채 초록이다.**
+> 판정은 시계가 아니라 `pg_stat_activity`의 **대기 지점**이다(`group-delete`가 시간 기반
+> 단언으로 한 번 헛돈 전례 그대로).
+> · **9a**: 경쟁 세션이 `for key share`를 쥔 채 **진짜** `deleteAccount`를 부른다 →
+>   `for update`에서 기다린다(= 탈퇴가 정말 그 문장으로 시작한다).
+> · **9b**: 손으로 연 트랜잭션이 `for update` + `deleted_at` UPDATE를 쥔 채 **진짜**
+>   `createExpense`를 부른다 → `for key share`에서 기다렸다가 `ACCOUNT_DELETED`, 원장 불변.
+>   9b가 탈퇴 쪽을 손으로 연출하는 이유: 진짜 액션은 열어 둔 채 붙잡을 수 없다(커밋하면 끝난다).
+>   그 액션이 정말 그렇게 시작한다는 것은 9a가 DB에게 물어 확인하므로 둘이 짝으로 성립한다.
+>   덕분에 9b는 **총무**를 대상으로 써도 되고(자격은 9b의 주제가 아니다) `createExpense`
+>   (총무 전용)를 그대로 쓸 수 있다 — 플랜이 지목한 "원장 생성"이 그대로 시험된다.
+>
+> **7. 단언 5번의 좁힘을 테스트가 들고 있게 했다.** 이름이
+> "**구조화된 식별자 컬럼**에 … 없다 — **자유 텍스트(원장 메모·계좌 문구·정산 제목)는 파기
+> 범위가 아니다**"이고, 픽스처가 그 셋에 탈퇴자의 이름·이메일을 **일부러 심은 뒤** 파기 후에도
+> **그대로 있음**을 단언한다. 그래서 범위가 우연이 아니라 의도임이 테스트에 남는다(리뷰 BLOCKER 5).
+> 같은 이유로 2번은 `created_by`가 **탈퇴자의 UUID 그대로**임을 단언한다 — ADR-004 결정 2(a)가
+> 적은 한계가 주장이 아니라 고정된 사실이 된다.
+>
+> **8. 파기 목록 대조를 추가했다(5b) — 플랜에 없던 단언이다.** 모임 삭제에는 FK 폐포라는
+> 구조적 오라클이 있지만 "무엇이 식별자인가"에는 없다. 그래서 **전수 분류**로 대신한다:
+> 탈퇴가 다루는 여섯 테이블(`account`·`session`·`verification`·`user`·`memberships`·
+> `settlement_participants`)의 텍스트 컬럼 하나하나가 ① 행째 삭제 ② 값 덮어쓰기 ③ 테스트의
+> `KEPT`에 **이유와 함께** 명시 — 셋 중 하나여야 한다. 컬럼이 추가되면 어디에도 없으므로
+> 이 테스트가 **먼저** 빨개진다.
+>
+> **9. 동명이인 픽스처 — 같은 모임에 표시 이름 '민지'가 둘이다.** 한 명이 탈퇴하면 그 사람의
+> 멤버십·정산 스냅샷만 `탈퇴한 멤버`가 되고 **다른 '민지'는 그대로여야** 한다. 이름 문자열로
+> 찾는 구현이면 4번이 빨개진다 — `membershipId` 키잉의 증거가 이 픽스처다(리뷰 BLOCKER 4).
+>
+> **10. 변이 증명 4건(전부 되돌림 완료). 플랜의 예측 하나가 틀렸고, 그 이유가 유익하다.**
+> · `memberships.displayName` 익명화 끔 → **3·5·7번 빨강**(`expected '민지' to be '탈퇴한 멤버'`).
+>   플랜은 5번만 예측했다.
+> · `account` 행 삭제 끔 → **1·5번 빨강**(`account에 탈퇴자의 행이 남아 있다: expected 1 to be +0`).
+>   ⚠️ 플랜은 "5번/**8번**"을 예측했지만 **8번은 초록이었다.** 8번은 `account`가 아니라
+>   `deleted_at` 게이트가 지키기 때문이다. 즉 플랜의 예측은 두 방어선이 독립이라는 사실을
+>   놓치고 있었고, 그 독립성이야말로 8번이 붙잡으려던 성질이다.
+> · `session` 행 삭제 끔 → **1·5번 빨강**. 여기서도 8번은 **초록** — 세션 행이 살아 있어도
+>   `deleted_at` 게이트가 막는다(= 두 번째 방어선이 실제로 일하고 있다는 직접 증거).
+> · `createExpense`의 `assertActiveUser` 제거 → **9b 빨강**:
+>   `대기 지점이 탈퇴 확인이 아니다: insert into "ledger_entries" … expected … to contain 'for key share'`.
+>   쓰기가 확인 없이 곧장 insert로 갔다는 것이 대기 지점에 그대로 드러난다.
+>
+> **11. `'use server'` 파일은 async 함수만 export할 수 있다 — `npm run build`만 이것을 잡았다.**
+> 확인 문구 상수를 `actions/account.ts`에 두었더니 `tsc --noEmit`도 `eslint`도 통과했는데
+> 빌드가 거부했다: `The export deleteAccount was not found … The module has no exports at all.`
+> 에러가 **상수가 아니라 액션을 못 찾는다**고 나오는 종류라, 게이트를 순서대로 다 돌리지
+> 않았다면 원인을 찾는 데 한참 걸렸을 것이다. 값은 `lib/domain/account.ts`(순수 모듈)로 옮겼고,
+> 화면과 서버가 **같은 한 값**을 본다(비교 규칙이 갈리면 화면이 통과시킨 것을 서버가 거절한다).
+>
+> **12. 계정 화면은 새 라우트 `/account`이고 입구는 `/groups` 헤더의 '계정' 링크 하나다.**
+> 되돌릴 수 없는 동작을 여러 경로에 두지 않는다. 총무는 확인 입력 자체가 렌더되지 않고
+> (`delete-account-confirm` 0개) 버튼이 비활성이며, 문구가 **소유한 모임 이름**을 나열한다 —
+> "모임이 있어서"라고만 하면 모임을 여럿 가진 사람은 어느 것을 정리해야 할지 모른다.
+> 문구: "총무로 있는 모임(<이름들>)이 있어 탈퇴할 수 없습니다. 소유한 모임을 먼저 삭제해
+> 주세요. 총무를 다른 멤버에게 넘기는 기능은 아직 없습니다."(리뷰 MINOR 23)
+>
+> **13. e2e는 `authz.spec.ts`가 아니라 새 파일 `e2e/account-delete.spec.ts`다**(플랜 Files 목록과 다름).
+> 그 매트릭스는 **모임 스코프 쓰기**의 인가를 본다 — `deleteAccount`는 `authActionClient`뿐이라
+> `FORBIDDEN`·`NOT_MEMBER`가 성립하지 않고, 멤버·비멤버 역할에게는 **거부가 아니라 성공**이다.
+> 넣었다면 그 스펙이 의존하는 계정 둘이 도중에 사라진다(그리고 Task 2가 맨 마지막에 둔
+> 파괴적 대조군 뒤에 또 하나의 파괴를 쌓게 된다). 미인증 거부는 새 스펙에서 **같은 재생
+> 방식**으로 확인한다 — 그리고 거기서 한 걸음 더 간다: **탈퇴한 사람의 브라우저에 남아 있는
+> 진짜 쿠키**로 재생해 `UNAUTHENTICATED`를 받는다(리다이렉트는 화면의 성질이고 거부는 서버의
+> 성질이다 — 둘은 다른 주장이다). 쿠키가 아직 남아 있다는 **전제 자체도** 단언한다.
+> 새 스펙은 `newClientContext`를 **둘만** 쓴다 — 미인증 컨텍스트는 가입·로그인을 하지 않아
+> better-auth 버킷을 건드리지 않으므로 평범한 `browser.newContext()`로 충분하고,
+> 워커당 옥텟 배정 상한(16)에 여유를 남긴다(Task 1 노트 9가 실제로 넘쳐 깨진 적이 있다).
+>
+> **14. Task 1·2와의 상호작용 — 판단하고 적는다.**
+> · **레이트 리밋**: 무관하다. `rate_limits.bucket`은 접속 IP의 해시이고 사용자 id가 아니므로
+>   "이 사람의 레이트 리밋 행"이 존재하지 않는다(Task 2 노트 9와 같은 구조적 이유).
+>   `user`를 참조하지 않으므로 파기 목록에도 들어오지 않는다.
+> · **모임 삭제**: 겹치지 않는다. `lib/db/delete.ts`는 `user`·`session`·`account`·`verification`을
+>   명시적으로 제외하고 있고(그 파일의 "여기 **없는** 것" 절), 탈퇴는 반대로 모임 행을 건드리지
+>   않는다. 두 목록이 교차하는 테이블은 `memberships`·`settlement_participants` 둘인데
+>   **하는 일이 다르다** — 모임 삭제는 행을 지우고 탈퇴는 값을 덮어쓴다.
+> · **인가 매트릭스 순서**: 건드리지 않았다(위 13번). `deleteGroup` 성공 대조군은 여전히
+>   파일의 맨 마지막 테스트다.
+> · **총무는 탈퇴 불가**라는 규칙 덕분에 `deleteGroup`·재발급·계좌 문구에는 `assertActiveUser`를
+>   걸지 않아도 된다(위 5번) — Task 2의 결정이 이 태스크의 범위를 좁혀 줬다.
+>
+> **15. 스키마 변경 하나 — 마이그레이션 6 → 7.** `0006_user_deleted_at.sql`:
+> `ALTER TABLE "user" ADD COLUMN "deleted_at" timestamp with time zone;` — **추가 전용, DROP 없음.**
+> dev·test 적용 완료, 프로덕션은 CI `deploy` 잡이 적용한다. 새 **테이블**은 없으므로
+> `TEST_TABLES` 기대치는 그대로다. 이 컬럼만 `withTimezone: true`인 이유(auth-schema의 나머지는
+> CLI가 만든 `timestamp`)는 그 파일 주석에 있다.
+>
+> **테스트 수**: 단위 **172**(변화 없음 — 이 태스크에 순수 함수가 없다. 확인 문구 상수 하나뿐이고
+> 그것은 통합·e2e가 양쪽에서 쓴다) · 통합 62 → **73**(+11: 플랜이 요구한 9 + 파기 목록 대조 5b +
+> 동시성을 두 방향 9a·9b로 나눔) · e2e 24 → **29**(+5).
+> 브라우저 확인(1280·390, Playwright 뷰포트로 실측 — `resize_window`는 창만 바꾸고 뷰포트를
+> 바꾸지 않아 1920으로 찍히고 있었다): 위험 구역이 계정 화면 맨 아래에 붙고, 문구가 비었거나
+> 틀리면 버튼이 비활성, 정확히 맞으면 활성, 총무는 입력 없이 안내만. 두 너비 모두
+> `scrollWidth === clientWidth`(가로 넘침 없음).
 
 ---
 

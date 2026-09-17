@@ -1,6 +1,5 @@
-import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { getActiveSession } from '@/lib/session';
 import { attachmentDisposition, safeFilenamePart, toCsvFile, type CsvColumn } from '@/lib/csv';
 import { getAllEntries, getGroupForMember, type LedgerExportRow } from '@/lib/db/queries';
 import { formatDateKst } from '@/lib/format';
@@ -63,7 +62,7 @@ function reversalTargetOf(e: LedgerExportRow): string {
 export async function GET(_req: Request, { params }: { params: Promise<{ groupId: string }> }) {
   const { groupId } = await params;
 
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getActiveSession();
   if (!session) return new NextResponse('unauthorized', { status: 401 });
   // 멤버만. 비멤버에게는 401이 아니라 **404**다 — 401은 "그 모임은 있다"를 알려준다.
   const found = await getGroupForMember(groupId, session.user.id);
