@@ -134,11 +134,8 @@ describe('레이트 리밋 카운터', () => {
 
 describe('정리 크론 — IP 해시를 무기한 보관하지 않는다', () => {
   const ORIGINAL_CRON_SECRET = process.env.CRON_SECRET;
-  const ORIGINAL_DATABASE_URL = process.env.DATABASE_URL;
-
   beforeEach(() => {
     process.env.CRON_SECRET = 'integration-cron-secret';
-    process.env.DATABASE_URL = ORIGINAL_DATABASE_URL;
   });
 
   afterEach(() => {
