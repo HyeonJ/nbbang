@@ -30,6 +30,15 @@ import { account, memberships, session, settlementParticipants, user, verificati
  *  - **자유 텍스트** — `ledger_entries.memo` · `groups.account_label` ·
  *    `settlements.title`. 사용자가 거기에 자기 이름·이메일을 적었다면 **남는다.**
  *    파기 범위는 아래 두 상수가 말하는 "구조화된 식별자"로 한정된다(ADR-004 결정 2b).
+ *
+ *    ⚠️ **셋 중 하나는 사용자가 적은 게 아니다 — 앱이 적는다.** `actions/dues.ts`의
+ *    `markPaid`가 납부 원장 메모를 `` `${period} ${displayName}` ``으로 쓰므로, 회비를 한 번이라도
+ *    낸 멤버의 표시 이름은 **선택과 무관하게** 원장 메모에 들어가고 탈퇴 후에도 남는다. 그 값은
+ *    **공개 장부에 나간다**(Plan 04 Task 5 프로덕션 스모크에서 관측: 멤버 목록은 `탈퇴한 멤버`인데
+ *    기록 줄은 `2026-01 철수`). 결론(보존)은 코드와 맞지만 근거("본인이 적었다")는 이 경로에
+ *    성립하지 않는다 — ADR-004 결정 2(b)의 정정과 `docs/requirements.md` §8 P0을 보라.
+ *    고칠 때는 문자열 매칭이 아니라 `dues_payments`의 `ledger_entry_id` ↔ `membership_id`를 타는
+ *    **키 기반** 경로를 쓴다(이름 매칭 금지는 이 파일이 지키는 규칙이다).
  *  - **금액·참여 인원·이체 구조** — 한 글자도 바뀌지 않는다(ADR-001·ADR-003).
  *  - `ledger_entries` · `settlements` · `dues_payments` 행 — 모임의 기록이지 그 사람의
  *    기록이 아니다. 지우면 남은 멤버들의 장부가 어긋난다.

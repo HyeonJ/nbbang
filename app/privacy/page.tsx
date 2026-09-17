@@ -201,6 +201,16 @@ export default function PrivacyPage() {
               detail="지출 메모 · 입금 계좌 문구 · 정산 제목"
               value="그대로 남습니다"
             />
+            <Line
+              term="회비 납부 기록의 메모"
+              detail="회비를 낼 때 엔빵이 '2026-01 철수'처럼 회차와 모임 표시 이름을 자동으로 적습니다. 직접 입력한 글이 아닙니다."
+              value={
+                <>
+                  탈퇴해도 이름이 남습니다
+                  <span className="mt-1 block">공개 링크에도 보입니다</span>
+                </>
+              }
+            />
           </DataTable>
         </div>
         <ul className={`mt-6 space-y-3 ${NOTE}`}>
@@ -217,6 +227,15 @@ export default function PrivacyPage() {
             <b className="font-bold text-ink">그 글자는 남습니다.</b> 글 안에서 개인정보를 찾아 지우는
             기능은 없습니다 — 남의 이름이나 모임 이름을 잘못 지우는 문제가 함께 따라오기 때문입니다.
             필요하면 탈퇴하기 전에 직접 고치거나, 총무라면 모임을 삭제하세요.
+          </li>
+          <li className="border-l-2 border-accent pl-4 text-ink">
+            <b className="font-bold">회비 납부 기록의 메모는 직접 적은 글이 아닙니다.</b> 총무가 회비
+            납부를 체크하면 엔빵이 장부에 &lsquo;2026-01 철수&rsquo; 같은 줄을 자동으로 적습니다. 그래서
+            탈퇴해서 모임 표시 이름이 &lsquo;탈퇴한 멤버&rsquo;로 바뀌어도{' '}
+            <b className="font-bold">그 줄에 적힌 이름은 남고, 공개 장부 링크를 가진 사람에게도 보입니다.</b>{' '}
+            이것은 의도한 설계가 아니라 뒤늦게 발견한 한계입니다 — 고치는 것을 다음 작업으로 올려
+            두었고, 그때까지 사실대로 적어 둡니다. 이름이 남는 것이 문제라면 탈퇴 전에 총무에게
+            모임 삭제를 요청하세요(모임을 삭제하면 그 줄도 함께 사라집니다).
           </li>
           <li>
             <b className="font-bold text-ink">총무는 바로 탈퇴할 수 없습니다.</b> 소유한 모임이 있으면 그
