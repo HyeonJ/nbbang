@@ -88,8 +88,33 @@ export const ledgerEntries = pgTable('ledger_entries', {
   amount: integer('amount').notNull(),
   occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
   category: text('category'),
+  /**
+   * ⚠️ **두 종류의 글이 한 컬럼에 섞여 있다.**
+   *  · 지출(`createExpense`)·정정 메모 → **사용자가 타이핑한** 자유 텍스트
+   *  · 회비 납부(`markPaid`) → **앱이 쓴** `` `${period} ${displayName}` `` — 멤버의 표시 이름이
+   *    선택과 무관하게 들어간다. 그리고 이 컬럼은 **공개 장부로 나간다**(`public-queries.ts`).
+   * 그래서 탈퇴 시 이 컬럼은 컬럼째 덮어쓰지도, 통째로 남기지도 않는다 — 아래
+   * `subjectMembershipId`로 지목된 행만 다시 쓴다(ADR-004 결정 2(b) 개정).
+   */
   memo: text('memo'),
   createdBy: text('created_by').notNull().references(() => user.id),
+  /**
+   * **이 메모가 가리키는 멤버.** `markPaid`가 납부 엔트리에만 채우고, 그 밖에는 `null`이다
+   * (지출·정정 메모는 사용자가 쓴 글이라 "대상 멤버"가 없다).
+   *
+   * 존재 이유는 하나다: **탈퇴 시 앱이 쓴 이름을 키로 찾아 지우기 위해서**다(ADR-004 개정).
+   * 이름 문자열로 찾는 것은 금지다 — 동명이인의 기록까지 지우고 개명 이력은 놓친다.
+   *
+   * ⚠️ `dues_payments`로는 그 키를 대신할 수 없다. 납부 취소(`unmarkPaid`)는 역분개를 남기고
+   * `dues_payments` **행을 지우므로**(ADR-001·Plan 02), 취소된 납부의 원장 엔트리에서
+   * 멤버십으로 가는 길이 그때 끊긴다. 그 엔트리의 메모에는 이름이 그대로 남아 있고 공개
+   * 장부에 계속 나간다 — 그것이 `docs/requirements.md` §8 P0이었다. 이 컬럼은 엔트리 자신에
+   * 붙어 있으므로 **취소되어도 남는다.**
+   *
+   * `null`을 허용하는 이유: 지출·정정 엔트리에는 대상 멤버가 없다. `MATCH SIMPLE` 기본 규칙에
+   * 따라 `null`이면 아래 복합 FK는 검사되지 않는다(`reversalOf`와 같은 성질).
+   */
+  subjectMembershipId: text('subject_membership_id'),
   // 역분개 대상. 같은 대상에 둘 이상 달릴 수 없다.
   reversalOf: text('reversal_of').unique(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -104,6 +129,18 @@ export const ledgerEntries = pgTable('ledger_entries', {
     columns: [t.groupId, t.reversalOf],
     foreignColumns: [t.groupId, t.id],
     name: 'ledger_entries_reversal_fk',
+  }),
+  /**
+   * 대상 멤버는 반드시 **같은 모임의 실재하는** 멤버십이다 — `dues_payments`의 세 복합 FK와
+   * 같은 관용구다(단일 컬럼 FK는 "그 행이 존재함"만 보고 모임 경계는 보지 못한다).
+   * `groups`를 지울 때 `ledger_entries`가 `memberships`보다 **먼저** 지워져야 하는데
+   * `GROUP_CHILD_DELETE_ORDER`가 이미 그 순서다(`lib/db/delete.ts`) — 통합 테스트의 FK 폐포
+   * 대조가 그 순서를 FK 메타데이터로 다시 확인한다.
+   */
+  foreignKey({
+    columns: [t.groupId, t.subjectMembershipId],
+    foreignColumns: [memberships.groupId, memberships.id],
+    name: 'ledger_entries_subject_membership_fk',
   }),
   /**
    * 이 레포에서 가장 자주 도는 읽기의 모양 그대로다 — `where group_id = ? order by occurred_at`.

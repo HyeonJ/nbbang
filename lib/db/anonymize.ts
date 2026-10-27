@@ -1,6 +1,14 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { db } from '.';
-import { account, memberships, session, settlementParticipants, user, verification } from './schema';
+import {
+  account,
+  ledgerEntries,
+  memberships,
+  session,
+  settlementParticipants,
+  user,
+  verification,
+} from './schema';
 
 /**
  * **파기되는 것의 전체 목록**이다 — 회원 탈퇴 판(ADR-004).
@@ -22,23 +30,26 @@ import { account, memberships, session, settlementParticipants, user, verificati
  * 회차가 "미납"으로 보이거나 아예 없던 일이 된다 — **없던 사실을 만드는 파기**는 파기가
  * 아니라 손상이다. 그래서 행은 남기고 이름만 익명화한다.
  *
+ * ── 파기의 **모양이 둘**이다: 컬럼째 vs 키로 지목한 행만 ────────────────────
+ * `ERASED_IDENTIFIER_COLUMNS`의 다섯 컬럼은 **그 사람의 것이 확실하므로** 컬럼째 덮어쓴다.
+ * `ERASED_APP_WRITTEN_COLUMNS`(= `ledger_entries.memo`)는 다르다 — 한 컬럼에 **앱이 쓴**
+ * 회비 납부 메모와 **사용자가 쓴** 지출·정정 메모가 섞여 있어서, 컬럼째 덮어쓰면 남의 글까지
+ * 지우고 통째로 두면 파기를 요청한 사람의 이름이 공개 장부에 남는다. 그래서 그 컬럼만은
+ * `ledger_entries.subject_membership_id`로 **지목된 행**만 다시 쓴다(ADR-004 결정 2(b) 개정).
+ *
  * ── 여기 **없는** 것 ────────────────────────────────────────────────────────
  *  - **`user.id`** — 보존된다. 탈퇴자의 과거 활동은 하나의 안정적 UUID로 계속 연결되므로
  *    이것은 "연결 불가능한 익명화"가 **아니다.** 숨기지 않는다(ADR-004 결정 2a).
  *    `created_by` 셋을 nullable로 바꾸는 대안은 3테이블 마이그레이션 + "누가 기록했는가"의
  *    영구 소실을 대가로 하므로 v1에서 기각했다.
- *  - **자유 텍스트** — `ledger_entries.memo` · `groups.account_label` ·
- *    `settlements.title`. 사용자가 거기에 자기 이름·이메일을 적었다면 **남는다.**
- *    파기 범위는 아래 두 상수가 말하는 "구조화된 식별자"로 한정된다(ADR-004 결정 2b).
+ *  - **사용자가 타이핑한 자유 텍스트** — `groups.account_label` · `settlements.title` ·
+ *    그리고 `ledger_entries.memo` 중 **지출·정정 메모**. 거기에 자기 이름·이메일·계좌번호를
+ *    적었다면 **남는다.** 지우려면 자유 텍스트 PII 탐지가 필요하고, 그것은 오탐(남의 이름·모임
+ *    이름을 지움)과 미탐을 동시에 갖는 별개의 문제다(ADR-004 결정 2(b) · §8 P5).
  *
- *    ⚠️ **셋 중 하나는 사용자가 적은 게 아니다 — 앱이 적는다.** `actions/dues.ts`의
- *    `markPaid`가 납부 원장 메모를 `` `${period} ${displayName}` ``으로 쓰므로, 회비를 한 번이라도
- *    낸 멤버의 표시 이름은 **선택과 무관하게** 원장 메모에 들어가고 탈퇴 후에도 남는다. 그 값은
- *    **공개 장부에 나간다**(Plan 04 Task 5 프로덕션 스모크에서 관측: 멤버 목록은 `탈퇴한 멤버`인데
- *    기록 줄은 `2026-01 철수`). 결론(보존)은 코드와 맞지만 근거("본인이 적었다")는 이 경로에
- *    성립하지 않는다 — ADR-004 결정 2(b)의 정정과 `docs/requirements.md` §8 P0을 보라.
- *    고칠 때는 문자열 매칭이 아니라 `dues_payments`의 `ledger_entry_id` ↔ `membership_id`를 타는
- *    **키 기반** 경로를 쓴다(이름 매칭 금지는 이 파일이 지키는 규칙이다).
+ *    ⚠️ **회비 납부 메모는 여기 들어가지 않는다 — 앱이 쓴 식별자다.** 셋을 "사용자가 직접 적은
+ *    자유 텍스트"로 묶은 것이 P0 결함의 원인이었다(Plan 04 Task 5 프로덕션 스모크에서 관측:
+ *    멤버 목록은 `탈퇴한 멤버`인데 기록 줄은 `2026-01 철수`). 그 경로는 위 단락대로 파기된다.
  *  - **금액·참여 인원·이체 구조** — 한 글자도 바뀌지 않는다(ADR-001·ADR-003).
  *  - `ledger_entries` · `settlements` · `dues_payments` 행 — 모임의 기록이지 그 사람의
  *    기록이 아니다. 지우면 남은 멤버들의 장부가 어긋난다.
@@ -64,11 +75,34 @@ export const deletedEmail = (): string => `deleted-${crypto.randomUUID()}@delete
 export const ERASED_ROW_TABLES: readonly string[] = ['account', 'session', 'verification'];
 
 /**
+ * **앱이 쓴 식별자**가 들어가는 텍스트 컬럼. `[테이블, 컬럼]`.
+ *
+ * 위 `ERASED_ROW_TABLES`·아래 `ERASED_IDENTIFIER_COLUMNS`와 다른 점은 **파기의 범위**다 —
+ * 이 컬럼은 컬럼째 덮어쓰지 않고 **키로 지목된 행만** 다시 쓴다. `ledger_entries.memo`에는
+ * 앱이 쓴 납부 메모와 사용자가 쓴 지출 메모가 섞여 있고, 전자는 파기 대상이지만 후자는
+ * 범위 밖이기 때문이다(ADR-004 결정 2(b) 개정). 키는 `subject_membership_id`다.
+ *
+ * 목록이 하나 더 생기는 대가를 치르는 이유: "이 컬럼은 어느 규약으로 파기되는가"가 코드에
+ * 적혀 있지 않으면, 다음 사람이 컬럼째 덮어써 남의 글을 지우거나 통째로 남겨 P0을 되살린다.
+ * 통합 테스트 5b가 세 목록 + "식별자 아님" 분류로 **아홉 테이블의 텍스트 컬럼 전부**를 덮는지
+ * 대조하고, 한 컬럼이 두 목록에 동시에 오르는 것도 깬다.
+ */
+export const ERASED_APP_WRITTEN_COLUMNS: readonly (readonly [string, string])[] = [
+  ['ledger_entries', 'memo'],
+];
+
+/**
  * 탈퇴 시 **값이 덮어써지는** 구조화된 식별자 컬럼. `[테이블, 컬럼]`.
  *
  * 통합 테스트가 이 목록을 두 방향으로 쓴다: ① 여기 적힌 컬럼에 원래 이메일·표시명이
- * 남지 않았는지 확인하고, ② 이 목록 + `ERASED_ROW_TABLES` + 테스트의 "식별자 아님" 분류가
- * 여섯 테이블의 텍스트 컬럼 **전부**를 덮는지 대조한다. 컬럼이 추가되면 그 대조가 먼저 빨개진다.
+ * **한 행도** 남지 않았는지 확인하고(컬럼째 파기이므로 "테이블 어디에도 없다"가 성립한다),
+ * ② 이 목록 + `ERASED_ROW_TABLES` + `ERASED_APP_WRITTEN_COLUMNS` + 테스트의 "식별자 아님"
+ * 분류가 아홉 테이블의 텍스트 컬럼 **전부**를 덮는지 대조한다. 컬럼이 추가되면 그 대조가
+ * 먼저 빨개진다.
+ *
+ * ⚠️ `ledger_entries.memo`를 **여기 넣지 말 것.** 그 컬럼은 사용자가 쓴 지출 메모와 같은
+ * 자리를 쓰므로 ①의 "테이블 어디에도 없다"가 성립하지 않는다(그 메모는 일부러 남긴다).
+ * 그쪽은 `ERASED_APP_WRITTEN_COLUMNS`다.
  */
 export const ERASED_IDENTIFIER_COLUMNS: readonly (readonly [string, string])[] = [
   ['user', 'email'],
@@ -77,6 +111,27 @@ export const ERASED_IDENTIFIER_COLUMNS: readonly (readonly [string, string])[] =
   ['memberships', 'display_name'],
   ['settlement_participants', 'display_name_at_time'],
 ];
+
+/**
+ * 탈퇴 후 **회비 납부 메모**에 들어갈 값. `` `${period} ${displayName}` `` → `` `${period} 탈퇴한 멤버` ``.
+ *
+ * 이 표현식이 보는 것은 **앱이 쓴 형식의 앞 7자**(`YYYY-MM`)뿐이고 이름은 쳐다보지 않는다 —
+ * 이름 문자열 매칭은 이 파일이 지키는 금지 규칙이다(동명이인·개명). 어느 행에 적용할지는
+ * 전적으로 `subject_membership_id` 키가 정한다.
+ *
+ * 형식이 예상과 다르면(= 기간 접두사가 없으면) 기간을 **추측하지 않고** 값을 통째로
+ * `'탈퇴한 멤버'`로 덮는다. 파기 쪽으로 기운 선택이다 — 어디가 이름인지 모르는 문자열을
+ * 부분만 남기는 것보다 안전하다. `null`은 그대로 둔다(메모 없는 엔트리에 이름을 적을 이유가 없다).
+ *
+ * 별도 상수로 export하는 이유: `lib/db/anonymize.test.ts`가 **DB 없이** 이 SQL의 모양을
+ * 고정한다(기간 보존 · 이름 매칭 부재). 단위 테스트가 닿을 수 있는 유일한 형태다.
+ */
+export const anonymizedDuesMemo = sql`case
+    when ${ledgerEntries.memo} is null then null
+    when left(${ledgerEntries.memo}, 8) ~ '^[0-9]{4}-[0-9]{2} '
+      then left(${ledgerEntries.memo}, 7) || ' ' || ${ANONYMOUS_MEMBER_NAME}
+    else ${ANONYMOUS_MEMBER_NAME}
+  end`;
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -111,6 +166,27 @@ export async function anonymizeUserRows(tx: Tx, userId: string, email: string): 
       .update(memberships)
       .set({ displayName: ANONYMOUS_MEMBER_NAME })
       .where(eq(memberships.userId, userId));
+
+    // ── 1-b. 앱이 쓴 회비 납부 메모 — **키로 지목된 행만** ──────────────────
+    //
+    // `markPaid`는 납부 원장 메모를 `${period} ${displayName}`으로 쓴다. 사용자가 적은 글이
+    // 아니라 **앱이 적은 식별자**이고, 그 값은 공개 장부로 나간다(`public-queries.ts`가 memo를
+    // 내보낸다) — 그래서 파기 대상이다(ADR-004 결정 2(b) 개정).
+    //
+    // ⚠️ **키는 `dues_payments`가 아니라 `subject_membership_id`다.** 납부 취소는 역분개를
+    // 남기고 `dues_payments` **행을 지우므로**(ADR-001·Plan 02), 그 테이블을 타는 구현은
+    // **취소된 납부를 놓친다** — 그 엔트리의 메모에는 이름이 그대로 남고 공개 장부에 계속
+    // 나간다. 통합 테스트 5c가 취소된 납부를 픽스처에 두어 그 구현이면 빨개지게 한다.
+    //
+    // **회차 기간은 남긴다.** '2026-02'는 사람의 식별자가 아니라 그 입금이 어느 회차의 것인지다 —
+    // 지우면 남은 멤버들의 장부에서 그 정보가 사라진다(파기 요청에 없던 손상이다). 기간을
+    // 떼어낼 때 보는 것은 **앱이 쓴 형식의 앞 7자**이고 이름은 쳐다보지 않는다. 이름 문자열로
+    // 찾는 것은 이 파일이 지키는 금지 규칙이다 — 동명이인의 기록까지 지우고(한 모임에 '민지'가
+    // 둘일 수 있다) 개명 이력은 반대로 놓친다.
+    await tx
+      .update(ledgerEntries)
+      .set({ memo: anonymizedDuesMemo })
+      .where(inArray(ledgerEntries.subjectMembershipId, membershipIds));
   }
 
   // ── 2. 자격증명·세션 (행째로) ────────────────────────────────────────────

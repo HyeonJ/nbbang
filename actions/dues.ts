@@ -98,8 +98,20 @@ export const markPaid = groupActionClient
           amount,
           occurredAt: new Date(),
           category: '회비',
+          /**
+           * ⚠️ 이 메모는 **앱이 쓰는 식별자**다 — 사용자가 적은 자유 텍스트가 아니다.
+           * 멤버의 표시 이름이 본인의 선택과 무관하게 들어가고, 이 컬럼은 **공개 장부로
+           * 나간다**(`lib/db/public-queries.ts`). 그래서 탈퇴 시 파기 대상이고
+           * (ADR-004 결정 2(b) 개정), 아래 `subjectMembershipId`가 그 파기의 **키**다.
+           * 이름을 메모에 적는 것을 그만두지 않은 이유: 남은 멤버들의 장부에서 "이 +20,000이
+           * 누구 회비인가"를 읽을 수 있어야 하고, 그 정보는 탈퇴자 한 명 때문에 모두에게서
+           * 사라질 이유가 없다. 파기는 그 한 사람의 줄에만 일어난다.
+           */
           memo: `${round.period} ${member.displayName}`,
           createdBy: ctx.userId,
+          // 이 메모가 가리키는 사람. 탈퇴 파기가 **문자열이 아니라 이 키로** 메모를 찾는다.
+          // 모임 경계는 (group_id, subject_membership_id) 복합 FK가 DB에서 고정한다.
+          subjectMembershipId: member.id,
           reversalOf: null,
         });
         await tx.insert(duesPayments).values({
@@ -128,6 +140,11 @@ export const markPaid = groupActionClient
 /**
  * 납부 취소 = 역분개 + 납부 기록 삭제 (ADR-001). 원장은 +20,000/−20,000 두 줄로 영구히 남고
  * `dues_payments`는 "지금 납부 상태"만 들고 있다 — 그래서 재납부가 다시 가능해진다.
+ *
+ * ⚠️ **이 삭제가 원장 메모의 파기 키를 끊지 않는다는 점이 중요하다.** 지워지는 것은
+ * `dues_payments` 행이고, 원본 납부 엔트리의 `subject_membership_id`는 엔트리 자신에 붙어
+ * 있어 그대로 남는다. 파기를 `dues_payments`로 구현했다면 취소된 납부의 메모에 탈퇴자의
+ * 이름이 영구히 남았다(그것이 §8 P0 결함의 진짜 폭) — `lib/db/anonymize.ts` 1-b 참조.
  *
  * assertReversible을 부르지 않는 이유: 대상 엔트리는 살아 있는 납부 기록이 가리키는 엔트리다.
  * 역분개는 그 기록을 지우는 같은 트랜잭션 안에서만 일어나므로, 기록이 남아 있는 동안 그 엔트리가
@@ -177,6 +194,8 @@ export const unmarkPaid = groupActionClient
           amount: reversalAmount(entry),
           occurredAt: new Date(),
           category: '회비',
+          // 앱이 쓰는 **상수**다 — 이름이 들어가지 않으므로 파기할 것도 없고,
+          // 그래서 `subjectMembershipId`도 비워 둔다(파기 키는 이름이 있는 줄에만 붙인다).
           memo: '납부 취소',
           createdBy: ctx.userId,
           reversalOf: entry.id,

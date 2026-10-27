@@ -50,6 +50,13 @@
       "when": 1789619292204,
       "tag": "0006_user_deleted_at",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793088749362,
+      "tag": "0007_ledger_subject_membership",
+      "breakpoints": true
     }
   ]
 }

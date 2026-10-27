@@ -814,6 +814,104 @@ Better Auth의 `deleteUser`는 **쓰지 않는다** — 하드 삭제라 FK 셋�
 
 ---
 
+## 후속 (2026-10-27) — Task 5가 연 **P0(회비 납부 메모)**을 닫았다
+
+Task 5 노트 1이 "동작은 바꾸지 않고 사실만 정정했다"고 남긴 결함을 여기서 고친다. 플랜 04의
+태스크가 아니라 그 플랜이 **남긴 빚의 청산**이므로 노트를 여기 잇는다.
+
+### 1. 감사 — 앱이 식별자를 텍스트 컬럼에 쓰는 자리는 **두 곳뿐**이다
+
+`markPaid` 한 줄만 고치면 되는 문제인지 확인하기 위해, 앱의 **모든** 쓰기(`.insert(` ·
+`.update(` 전수)를 훑고 각 텍스트 컬럼에 들어가는 값의 **출처**를 적었다.
+
+| 자리 | 컬럼 | 값 | 판정 |
+|---|---|---|---|
+| `actions/dues.ts` `markPaid` | `ledger_entries.memo` | `` `${round.period} ${member.displayName}` `` | ⚠️ **앱이 쓴 식별자. 공개 장부로 나간다 — 이것이 P0다** |
+| `actions/settlement.ts` `createSettlement` | `settlement_participants.display_name_at_time` | `memberships.display_name` 스냅샷 | **앱이 쓴 식별자이지만 이미 파기 범위**다(ADR-003 스냅샷 · `ERASED_IDENTIFIER_COLUMNS`). `membershipId` 키로 찾는다 |
+| `actions/dues.ts` `unmarkPaid` | `ledger_entries.memo` | `'납부 취소'` | 앱이 쓴 **상수**. 이름이 없다 |
+| `actions/dues.ts` `markPaid`/`unmarkPaid` | `ledger_entries.category` | `'회비'` | 앱이 쓴 상수 |
+| `actions/ledger.ts` `reverseEntry` | `ledger_entries.memo` | `` `정정: ${entryId.slice(0, 8)}` `` | 앱이 쓴 **원장 엔트리 id**의 앞 8자다 — 사람의 식별자가 아니다(그 값으로 도달하는 것은 금액 기록 한 줄이다). 파기 범위 밖 |
+| `actions/group.ts` `createGroup`·`setAccountLabel`, `actions/membership.ts` `join`, `actions/ledger.ts` `createExpense`, `actions/settlement.ts` | `groups.name`·`groups.account_label`·`memberships.display_name`·`ledger_entries.memo`/`category`·`settlements.title` | **사용자 입력 그대로** | 앱이 만든 값이 아니다. `memberships.display_name`만 이미 파기 범위(그 사람의 구조화된 식별자) |
+| `actions/group.ts` (토큰 재발급) | `groups.invite_token`·`public_token` | `newToken()` 난수 | 모임의 비밀이지 사람의 식별자가 아니다 |
+| `lib/db/anonymize.ts` | `user.email`·`user.name` | `deleted-<uuid>@…`·`'탈퇴한 사용자'` | 파기가 쓰는 값 |
+| `lib/rate-limit.ts` | `rate_limits.bucket` | `hashIp()` HMAC | 복원 불가 해시(Task 1). 모임·사람에 매달려 있지 않다 |
+| Better Auth | `user.name`·`user.email`·`account`·`session`·`verification` | 라이브러리가 쓴다 | 전부 이미 파기 범위(`ERASED_*`). `session.ip_address`·`user_agent`는 Task 5가 비웠다 |
+
+**결론: 앱이 사람의 식별자를 쓰는 자리는 둘이고(`markPaid`·`createSettlement`), 그중 파기
+범위 밖이던 것은 `markPaid` 하나다.** 반례를 찾으려 한 자리 — 취소·정정 메모, 정산 제목,
+CSV의 `정정대상` 열(= 대상 엔트리의 메모를 **조회 시점에** 이어 붙인다 → 원본이 파기되면 함께
+파기된다), 공개 장부의 select — 중 새 식별자를 만드는 곳은 없었다.
+
+### 2. 공백: **취소된 납부**
+
+ADR-004의 정정 절은 고칠 키 경로로 `dues_payments`(`ledger_entry_id` ↔ `membership_id`)를
+적어 두었다. 그 경로는 **절반만 맞다** — `unmarkPaid`가 납부 취소를 *역분개 + `dues_payments`
+행 삭제*로 구현하므로(ADR-001·Plan 02), 이름이 적힌 원장 줄에서 멤버십으로 가는 유일한 키가
+그때 끊긴다. 취소된 납부의 메모는 `2026-01 철수` 그대로 남아 공개 장부에 계속 나간다.
+
+그래서 **`ledger_entries.subject_membership_id`**(nullable + `(group_id, …)` 복합 FK)를
+추가했다 — 키가 엔트리 자신에 붙으므로 취소되어도 끊기지 않는다. 기각한 대안 셋(납부 기록을
+'취소됨'으로 남기기 · 메모에서 이름을 빼기 · 읽을 때 조인하기)의 근거는 ADR-004에 있다.
+마이그레이션은 **추가 전용 두 문장**이다(`drizzle/0007_ledger_subject_membership.sql`).
+
+### 3. ⚠️ 게이트를 돌리지 못했다 — test DB 자격증명 만료
+
+**이 후속 작업은 DB가 필요한 게이트를 하나도 통과하지 못했다.** 숨기지 않고 적는다.
+
+```
+NeonDbError: password authentication failed for user 'neondb_owner'
+  ❯ requireTestDatabase test/db-guard.ts:85:20
+```
+
+- 로컬 `.env.test`·`.env.local` **둘 다** 같은 오류다(dev·test 브랜치 양쪽).
+- **CI도 같다** — 검증용 브랜치를 올려 `TEST_DATABASE_URL` 시크릿으로 `test:integration`을
+  돌렸고 같은 줄에서 죽었다(run 40471791694). 즉 로컬 파일이 낡은 것이 아니라 **Neon 쪽
+  비밀번호가 바뀌었다.** `vercel env pull`도 토큰 만료로 막혀 프로덕션 URL을 받을 수 없었다.
+- 로컬 Postgres로 대신하는 길은 **일부러 가지 않았다**: 이 앱은 `@neondatabase/serverless`의
+  WS·HTTP 두 경로를 모두 쓰고(`Pool` + `neon()`), 통합 테스트 중 일부는 `for update` ↔
+  `for key share`가 **실제로 충돌하는지**를 두 트랜잭션을 겹쳐 본다. 프록시·단일 연결 에뮬레이션
+  위에서 초록이 나와도 그 초록은 거짓이다.
+
+**그래서 돌린 것 / 돌리지 못한 것**
+
+| 게이트 | 상태 |
+|---|---|
+| `lint` · `tsc --noEmit` · `npm test`(단위) · `npm run build` | ✅ 통과 |
+| `npm run test:integration` (5c·5b 포함) | ❌ **못 돌림** — 자격증명 |
+| `npm run e2e` (금칙 목록 확장 2건) | ❌ **못 돌림** — 자격증명 |
+| 변이 증명(메모 파기를 끄고 공개 장부·CSV 단언이 빨개지는지) | ❌ **못 함** — 위 둘이 선행이다 |
+| dev·test 브랜치에 마이그레이션 적용 | ❌ **못 함**. 프로덕션은 CI `deploy`가 한다(미실행) |
+
+단위 테스트로 **메울 수 있는 만큼만** 메웠다 — `lib/db/anonymize.test.ts`(신규 5개)가 파기
+SQL의 모양을 DB 없이 고정한다: 기간 보존(`left(memo, 7)`)·이름 매칭 부재(바인딩 값이 익명
+이름 둘뿐)·조인 부재·`memo`가 컬럼째 파기 목록에 **없음**. 렌더된 문장도 눈으로 확인했다:
+
+```sql
+update "ledger_entries" set "memo" = case
+    when "ledger_entries"."memo" is null then null
+    when left("ledger_entries"."memo", 8) ~ '^[0-9]{4}-[0-9]{2} '
+      then left("ledger_entries"."memo", 7) || ' ' || $1
+    else $2
+  end where "ledger_entries"."subject_membership_id" in ($3, $4)
+```
+
+### 4. 자격증명이 돌아오면 할 일 (순서대로, **순차로만**)
+
+1. Neon 콘솔에서 `neondb_owner` 비밀번호를 재발급 → `.env.local`·`.env.test` 갱신 →
+   `gh secret set TEST_DATABASE_URL`(+ 필요하면 프로덕션 env).
+2. `npm run db:migrate` · `npm run db:migrate:test` — `0007`이 적용되는 것을 **SQL을 읽고** 확인.
+3. `npm run test:integration` → **5c가 초록인지**가 이 변경의 본체다.
+4. `npm run build` → `npm run e2e` → 공개 장부·CSV 금칙 목록(탈퇴자 이름 포함)이 초록인지.
+5. **변이 증명**: `lib/db/anonymize.ts`의 1-b 블록을 주석 처리하고 e2e를 다시 돌린다.
+   기대: `공개 장부 200: 원시 응답 본문에 탈퇴자의 모임 표시 이름(탈퇴자LEAK7391)이 들어 있다` ·
+   `CSV에 탈퇴자의 모임 표시 이름(철수)이 들어 있다`. **구조 단언이 먼저 빨개지면 안 된다** —
+   그래서 공개 장부 스펙의 `'2026-01 탈퇴한 멤버'` 단언은 `expectNoLeaks` **뒤**에 뒀다
+   (Task 10이 CSV 헤더 단언으로 겪은 가림 문제). 확인 후 **되돌린다.**
+6. `next start`를 띄웠다면 강제 종료하지 말 것 — 유휴 Neon 백엔드가 남아 서버 액션이 **조용히**
+   실패한다(Task 3 노트). `pg_terminate_backend`로 정리한다.
+
+---
+
 ## 외부 리뷰 판정 (2026-09-16, codex)
 
 | # | 등급 | 지적 | 판정 |
@@ -858,7 +956,7 @@ Better Auth의 `deleteUser`는 **쓰지 않는다** — 하드 삭제라 FK 셋�
 
 | # | 미결 | 상태 |
 |---|---|---|
-| **P0** | **회비 납부 메모에 탈퇴자 이름이 남고 공개 장부에 보인다** | **결함.** Task 5 스모크에서 발견. 동작은 그대로 두고 사실만 정정했다(ADR-004 정정 절 · 처리방침 · `anonymize.ts` 주석). 키 기반 수정 경로까지 적어 뒀다 → **다음에 할 일 1순위** |
+| ~~**P0**~~ | ~~회비 납부 메모에 탈퇴자 이름이 남고 공개 장부에 보인다~~ | ✅ **닫음 (2026-10-27)** — 위 후속 노트. 키는 정정 절이 적어 둔 `dues_payments`가 **아니라** 새 컬럼 `ledger_entries.subject_membership_id`다(취소된 납부가 그 경로를 끊는다). ⚠️ DB 게이트는 자격증명 만료로 **미실행** — 후속 노트 3·4 |
 | P1 | 총무 위임 | 의도적 미구현. 총무는 소유 모임을 먼저 삭제해야 탈퇴할 수 있고, 에러 문구가 그 사실을 말한다(리뷰 MINOR 23) |
 | P2 | 다중 채권자 정산 | **의도적 범위 밖. 실사용 한 달 뒤에 판단한다**(ADR-003·Self-Review). 도메인 함수 하나(`minimalTransfers`) 교체 |
 | P3 | 이름·표시명 수정 화면 | 없다. 처리방침의 '이용자의 권리'가 그 사실을 적고 문의 경로로 안내한다 |
@@ -895,3 +993,7 @@ Better Auth의 `deleteUser`는 **쓰지 않는다** — 하드 삭제라 FK 셋�
 **Task 5가 새로 연 것**: 회비 납부 메모에 탈퇴자 이름이 남고 공개 장부에 보인다 → **P0**
 (Task 5 노트 1). 이 플랜이 네 번의 태스크에서 자기 전제를 계속 틀렸다는 사실의 다섯 번째 사례다 —
 이번에는 ADR이 몰랐던 경로였고, **프로덕션 스모크만이** 그것을 드러냈다.
+
+**→ 2026-10-27에 닫았다**(위 후속 노트). 그리고 그 수정이 **여섯 번째 사례**를 만들었다:
+Task 5가 적어 둔 수정 경로(`dues_payments` 키)가 **취소된 납부를 놓친다**. 플랜이 적은 해법을
+그대로 구현하면 결함의 절반이 남는 상태였다 — 이번에도 플랜을 따르지 않고 확인한 쪽이 맞았다.

@@ -4,6 +4,7 @@ import { db, pool } from '@/lib/db';
 import {
   ANONYMOUS_MEMBER_NAME,
   ANONYMOUS_USER_NAME,
+  ERASED_APP_WRITTEN_COLUMNS,
   ERASED_IDENTIFIER_COLUMNS,
   ERASED_ROW_TABLES,
 } from '@/lib/db/anonymize';
@@ -90,15 +91,27 @@ type Fixture = {
   roundId: string;
   /** 탈퇴자가 **적은** 지출. `created_by`와 자유 텍스트 메모가 모두 탈퇴자를 가리킨다. */
   leaverEntryId: string;
+  /** 탈퇴자의 **살아 있는** 납부가 만든 원장 엔트리 — `dues_payments` 행이 이것을 가리킨다. */
+  duesEntryId: string;
+  /** 탈퇴자의 **취소된** 납부가 만든 원장 엔트리 — `dues_payments` 행이 **없다**. */
+  cancelledDuesEntryId: string;
+  /** 위 취소가 남긴 역분개. 메모는 앱이 쓴 상수('납부 취소')라 이름이 들어 있지 않다. */
+  reversalEntryId: string;
+  /** **동명이인**의 납부가 만든 원장 엔트리 — 메모가 글자 그대로 '2026-02 민지'다. */
+  twinDuesEntryId: string;
   settlementId: string;
 };
 
 /**
  * 탈퇴가 건드리는 것과 건드리면 **안 되는** 것이 모두 들어 있는 모임 하나.
  *
- * 자유 텍스트 덫을 셋 심는다 — 원장 메모·입금 계좌 문구·정산 제목에 탈퇴자의 이름과 이메일이
- * 들어간다. ADR-004 결정 2(b)가 "자유 텍스트는 파기 대상이 아니다"라고 적었으므로, 그것들이
+ * **사용자가 타이핑한** 자유 텍스트 덫을 셋 심는다 — 지출 메모·입금 계좌 문구·정산 제목에
+ * 탈퇴자의 이름과 이메일이 들어간다. ADR-004 결정 2(b)가 그쪽은 파기 범위가 아니라고 적었으므로,
  * **그대로 남아 있음**을 단언해야 범위의 좁힘이 우연이 아니라 의도임이 테스트에 남는다.
+ *
+ * 반대로 **앱이 쓴** 회비 납부 메모는 셋 심고(살아 있는 납부 · 취소된 납부 · 동명이인의 납부)
+ * 그쪽은 **파기됨**을 단언한다(5c). 두 덫이 한 픽스처에 함께 있어야 ADR-004 결정 2(b)의
+ * 쪼개진 경계 — 앱이 쓴 식별자는 파기, 사용자가 쓴 자유 텍스트는 범위 밖 — 가 테스트로 성립한다.
  */
 async function seed(): Promise<Fixture> {
   const owner = await signUp('영희', 'owner');
@@ -126,10 +139,11 @@ async function seed(): Promise<Fixture> {
   const twinMembershipId = await mk(twin, 'member', '민지');
 
   const entry = async (
-    type: 'DUES_PAYMENT' | 'EXPENSE',
+    type: 'DUES_PAYMENT' | 'EXPENSE' | 'REVERSAL',
     amount: number,
     createdBy: string,
     memo: string,
+    extra: { reversalOf?: string; subjectMembershipId?: string } = {},
   ) => {
     const id = crypto.randomUUID();
     await db.insert(ledgerEntries).values({
@@ -138,13 +152,38 @@ async function seed(): Promise<Fixture> {
       type,
       amount,
       occurredAt: new Date('2026-02-01T03:00:00Z'),
-      category: type === 'DUES_PAYMENT' ? '회비' : '식비',
+      category: type === 'EXPENSE' ? '식비' : '회비',
       memo,
       createdBy,
+      reversalOf: extra.reversalOf ?? null,
+      subjectMembershipId: extra.subjectMembershipId ?? null,
     });
     return id;
   };
-  const duesEntryId = await entry('DUES_PAYMENT', 20_000, owner.userId, '2026-02 민지');
+  /**
+   * 회비 납부 메모는 **앱이** `` `${period} ${displayName}` ``으로 쓴다(`markPaid`) — 픽스처도
+   * 그 모양 그대로 심는다. 아래 세 엔트리의 메모는 **글자 그대로 같고**, 가리키는 사람만 다르다:
+   * 탈퇴자의 살아 있는 납부 · 탈퇴자의 **취소된** 납부 · **동명이인**의 납부.
+   * 이름 문자열로 찾는 구현이면 셋이 함께 지워지고, `dues_payments`만 타는 구현이면 가운데가 남는다.
+   */
+  const duesEntryId = await entry('DUES_PAYMENT', 20_000, owner.userId, '2026-02 민지', {
+    subjectMembershipId: leaverMembershipId,
+  });
+  /**
+   * **취소된 납부** — `unmarkPaid`가 남기는 모양 그대로다(ADR-001·Plan 02): 역분개를 한 줄
+   * 덧붙이고 `dues_payments` **행을 지운다.** 그래서 이 엔트리에서 멤버십으로 가는 키가
+   * `dues_payments`에는 **없다.** 메모의 이름은 그대로 남아 공개 장부로 나간다.
+   */
+  const cancelledDuesEntryId = await entry('DUES_PAYMENT', 20_000, owner.userId, '2026-02 민지', {
+    subjectMembershipId: leaverMembershipId,
+  });
+  // 취소가 남기는 역분개 — 메모가 앱이 쓴 상수라 대상 멤버를 달지 않는다(`unmarkPaid`와 같다).
+  const reversalEntryId = await entry('REVERSAL', -20_000, owner.userId, '납부 취소', {
+    reversalOf: cancelledDuesEntryId,
+  });
+  const twinDuesEntryId = await entry('DUES_PAYMENT', 20_000, owner.userId, '2026-02 민지', {
+    subjectMembershipId: twinMembershipId,
+  });
   // 자유 텍스트 덫 ② — 메모에 탈퇴자의 이메일이 통째로 들어 있다.
   const leaverEntryId = await entry('EXPENSE', -30_000, leaver.userId, `민지(${leaver.email}) 결제`);
 
@@ -157,6 +196,14 @@ async function seed(): Promise<Fixture> {
     roundId,
     membershipId: leaverMembershipId,
     ledgerEntryId: duesEntryId,
+  });
+  // 동명이인도 같은 회차를 냈다 — 탈퇴가 남의 납부·메모를 건드리지 않는지 보는 짝이다.
+  await db.insert(duesPayments).values({
+    id: crypto.randomUUID(),
+    groupId: gid,
+    roundId,
+    membershipId: twinMembershipId,
+    ledgerEntryId: twinDuesEntryId,
   });
 
   const settlementId = crypto.randomUUID();
@@ -184,6 +231,7 @@ async function seed(): Promise<Fixture> {
     gid, owner, leaver, twin,
     ownerMembershipId, leaverMembershipId, twinMembershipId,
     roundId, leaverEntryId, settlementId,
+    duesEntryId, cancelledDuesEntryId, reversalEntryId, twinDuesEntryId,
   };
 }
 
@@ -257,7 +305,8 @@ describe('회원 탈퇴 — 식별자 파기', () => {
     const after = await moneyState(fx.gid);
     expect(after.balance, '잔액이 변했다').toBe(before.balance);
     expect(after.entries, '원장 행 수가 변했다').toBe(before.entries);
-    expect(after.balance).toBe(-10_000);
+    // 회비 20,000 × 3(살아 있는 납부 · 취소된 납부 · 동명이인) − 역분개 20,000 − 지출 30,000
+    expect(after.balance).toBe(10_000);
 
     // **내부 UUID는 보존된다** — ADR-004 결정 2(a)가 정직하게 적은 한계가 여기 있다.
     // "누가 이 금액을 기록했는가"는 남고, 그래서 이것은 "연결 불가능한 익명화"가 아니다.
@@ -316,7 +365,7 @@ describe('회원 탈퇴 — 식별자 파기', () => {
     expect(parts.filter((p) => p.isPayer).map((p) => p.membershipId)).toEqual([fx.ownerMembershipId]);
   });
 
-  it('5. **구조화된 식별자 컬럼**에 원래 이메일·표시명이 남지 않는다 — 자유 텍스트(원장 메모·계좌 문구·정산 제목)는 파기 범위가 아니다', async () => {
+  it('5. **구조화된 식별자 컬럼**에 원래 이메일·표시명이 남지 않는다 — 사용자가 타이핑한 자유 텍스트(지출 메모·계좌 문구·정산 제목)는 파기 범위가 아니다', async () => {
     const fx = await seed();
     const { email } = fx.leaver;
 
@@ -347,10 +396,11 @@ describe('회원 탈퇴 — 식별자 파기', () => {
       expect(hits, `${table}에 탈퇴자의 행이 남아 있다`).toBe(0);
     }
 
-    // ── 파기되지 **않는** 쪽: 자유 텍스트 (ADR-004 결정 2b) ───────────────────
+    // ── 파기되지 **않는** 쪽: 사용자가 타이핑한 자유 텍스트 (ADR-004 결정 2b) ──
     // 이 세 단언이 있어야 위의 주장이 "DB 어디에도 없다"로 잘못 읽히지 않는다.
+    // (앱이 쓴 회비 납부 메모는 반대쪽이다 — 5c가 그것이 파기됨을 단언한다.)
     const [entry] = await db.select().from(ledgerEntries).where(eq(ledgerEntries.id, fx.leaverEntryId));
-    expect(entry.memo, '원장 메모가 파기됐다 — 자유 텍스트는 범위 밖이라고 ADR에 적었다').toContain(email);
+    expect(entry.memo, '사용자가 적은 지출 메모가 파기됐다 — 그쪽은 범위 밖이라고 ADR에 적었다').toContain(email);
     const [g] = await db.select().from(groups).where(eq(groups.id, fx.gid));
     expect(g.accountLabel).toContain('민지');
     const [s] = await db.select().from(settlements).where(eq(settlements.id, fx.settlementId));
@@ -361,12 +411,20 @@ describe('회원 탈퇴 — 식별자 파기', () => {
    * 파기 목록이 스키마와 어긋나지 않는가 — `group-delete`의 FK 폐포 대조와 같은 계열이다.
    *
    * 여기에는 FK 같은 구조적 오라클이 없으므로(무엇이 "식별자"인지는 판단이다) 분류를
-   * **전수로** 강제한다: 탈퇴가 다루는 여섯 테이블의 텍스트 컬럼 하나하나가
-   * ① 행째 삭제되거나 ② 값이 덮어써지거나 ③ **"식별자가 아니다"로 명시 분류**돼야 한다.
-   * 컬럼이 추가되면 셋 중 어디에도 없으므로 이 테스트가 **먼저** 빨개진다 —
-   * 새 식별자가 조용히 파기 밖에 남기 전에.
+   * **전수로** 강제한다: 탈퇴가 다루는 아홉 테이블의 텍스트 컬럼 하나하나가
+   * ① 행째 삭제되거나 ② 컬럼째 덮어써지거나 ③ **키로 지목된 행만** 다시 쓰이거나
+   * ④ **"식별자가 아니다"로 명시 분류**돼야 한다. 컬럼이 추가되면 넷 중 어디에도 없으므로
+   * 이 테스트가 **먼저** 빨개진다 — 새 식별자가 조용히 파기 밖에 남기 전에.
+   *
+   * ③이 ②와 따로 있는 이유가 이 테스트의 핵심이다. `ledger_entries.memo`에는 **앱이 쓴**
+   * 납부 메모와 **사용자가 쓴** 지출 메모가 같은 컬럼에 섞여 있다 — 컬럼째 덮어쓰면 남의
+   * 글까지 지우고, 아예 두면 파기를 요청한 사람의 이름이 공개 장부에 남는다(P0 결함).
+   * 그래서 이 컬럼은 `subject_membership_id` 키로 지목된 행만 다시 쓴다(5c).
+   *
+   * `groups`·`settlements`를 대조에 넣은 이유: ADR-004 결정 2(b)가 쪼개진 뒤 "사용자가
+   * 타이핑한 자유 텍스트는 범위 밖"이 **남은 절반**이 됐고, 그 절반도 분류로 들고 있어야 한다.
    */
-  it('5b. 탈퇴가 다루는 여섯 테이블의 텍스트 컬럼이 전부 분류돼 있다 (파기 목록 대조)', async () => {
+  it('5b. 탈퇴가 다루는 아홉 테이블의 텍스트 컬럼이 전부 분류돼 있다 (파기 목록 대조)', async () => {
     /** 식별자가 아니라서 **일부러 남기는** 컬럼 + 이유. */
     const KEPT: Record<string, string> = {
       'user.id': '내부 UUID — FK 셋이 참조한다. 보존이 ADR-004 결정 2(a)의 명시된 한계다',
@@ -378,9 +436,34 @@ describe('회원 탈퇴 — 식별자 파기', () => {
       'settlement_participants.group_id': '어느 모임인지',
       'settlement_participants.settlement_id': '어느 정산인지',
       'settlement_participants.membership_id': '익명화의 **키**다 — 이것을 지우면 찾을 수 없다',
+      'ledger_entries.id': '원장 행 식별자 — 역분개·납부 기록이 이 값으로 매달려 있다',
+      'ledger_entries.group_id': '어느 모임인지 — 사람의 식별자가 아니다',
+      'ledger_entries.type': "'DUES_PAYMENT' | 'EXPENSE' | 'REVERSAL' — 사람의 식별자가 아니다",
+      'ledger_entries.category': "'회비'·'식비' 같은 분류. 사용자가 타이핑한 자유 텍스트이고 이름 자리가 아니다",
+      'ledger_entries.created_by': 'user.id와 같은 값 — 보존이 ADR-004 결정 2(a)의 명시된 한계다',
+      'ledger_entries.reversal_of': '어느 엔트리를 정정했는지',
+      'ledger_entries.subject_membership_id': '메모 파기의 **키**다 — 이것을 지우면 찾을 수 없다',
+      'groups.id': '모임 식별자 — 사람의 식별자가 아니다',
+      'groups.name': '모임 이름. 총무가 타이핑한 자유 텍스트이고 모임의 것이다',
+      'groups.invite_token': '초대 링크 토큰 — 모임의 비밀이지 사람의 식별자가 아니다',
+      'groups.public_token': '공개 장부 토큰 — 같은 이유',
+      'groups.account_label': '입금 계좌 문구. **총무가 타이핑한** 자유 텍스트 — ADR-004 결정 2(b)의 남은 절반',
+      'settlements.id': '정산 행 식별자',
+      'settlements.group_id': '어느 모임인지',
+      'settlements.title': '정산 제목. **사용자가 타이핑한** 자유 텍스트 — ADR-004 결정 2(b)의 남은 절반',
+      'settlements.payer_membership_id': '선결제자 지목 — 금액 구조의 일부다(ADR-003). 멤버십 쪽 이름은 익명화된다',
+      'settlements.created_by': 'user.id와 같은 값 — 결정 2(a)',
     };
 
-    const TABLES = [...ERASED_ROW_TABLES, 'user', 'memberships', 'settlement_participants'];
+    const TABLES = [
+      ...ERASED_ROW_TABLES,
+      'user',
+      'memberships',
+      'settlement_participants',
+      'ledger_entries',
+      'groups',
+      'settlements',
+    ];
     const columns = (await sql.query(
       `select table_name, column_name
          from information_schema.columns
@@ -393,17 +476,91 @@ describe('회원 탈퇴 — 식별자 파기', () => {
     expect(columns.length, '텍스트 컬럼을 하나도 못 찾았다 — 대조가 헛돌고 있다').toBeGreaterThan(0);
 
     const overwritten = new Set(ERASED_IDENTIFIER_COLUMNS.map(([t, c]) => `${t}.${c}`));
+    const byKey = new Set(ERASED_APP_WRITTEN_COLUMNS.map(([t, c]) => `${t}.${c}`));
     const rowDeleted = new Set(ERASED_ROW_TABLES);
     const unclassified = columns
       .map((c) => `${c.table_name}.${c.column_name}`)
       .filter(
         (key) =>
-          !rowDeleted.has(key.split('.')[0]) && !overwritten.has(key) && !(key in KEPT),
+          !rowDeleted.has(key.split('.')[0]) &&
+          !overwritten.has(key) &&
+          !byKey.has(key) &&
+          !(key in KEPT),
       );
+    // 네 분류가 서로 겹치면 "어느 규약으로 파기되는가"가 두 개의 답을 갖는다.
+    for (const key of byKey) {
+      expect(overwritten.has(key), `${key}가 컬럼째 파기와 키 기반 파기에 모두 올라 있다`).toBe(false);
+      expect(key in KEPT, `${key}가 파기 목록과 KEPT에 모두 올라 있다`).toBe(false);
+    }
     expect(
       unclassified,
       '분류되지 않은 텍스트 컬럼이 있다 — lib/db/anonymize.ts의 목록에 넣거나 이 테스트의 KEPT에 이유와 함께 적어라',
     ).toEqual([]);
+  });
+
+  /**
+   * **P0 결함(`docs/requirements.md` §8)의 회귀 테스트.**
+   *
+   * `markPaid`는 납부 원장 메모를 **앱이** `` `${period} ${displayName}` ``으로 쓴다. 사용자가
+   * 무엇을 적었는지와 무관하게 회비를 한 번이라도 낸 멤버의 표시 이름이 들어가고, 그 값은
+   * **링크만 있으면 누구나 보는 공개 장부로 나간다.** Plan 04 Task 5의 프로덕션 스모크가
+   * 관측했다: 멤버 목록은 `탈퇴한 멤버`인데 기록 줄은 `2026-01 철수`.
+   *
+   * 이 테스트가 고정하는 네 가지:
+   *  ① **살아 있는 납부** 메모에서 이름이 사라지고 **회차 기간은 남는다**(기간은 식별자가 아니다).
+   *  ② **취소된 납부** 메모에서도 사라진다 — `dues_payments` 행이 **지워진** 경로다.
+   *     `dues_payments`만 타는 구현(ADR-004 정정 절이 처음 적었던 경로)은 여기서 빨개진다.
+   *  ③ **동명이인**의 납부 메모는 **그대로**다. 메모 세 줄이 글자 그대로 같으므로, 문자열로
+   *     찾는 구현이면 남의 기록까지 지워 여기서 빨개진다(ADR-004가 금지하는 그 구현).
+   *  ④ 금액·행 수·잔액은 불변이고, 사용자가 적은 지출 메모는 손대지 않는다.
+   */
+  it('5c. 회비 납부 원장 메모에서 탈퇴자의 이름이 사라지고 회차 기간은 남는다 — **취소된 납부까지**', async () => {
+    const fx = await seed();
+    const before = await moneyState(fx.gid);
+    const memoOf = async (id: string) => {
+      const [e] = await db.select().from(ledgerEntries).where(eq(ledgerEntries.id, id));
+      return e.memo;
+    };
+
+    // 덫이 실려 있는지 **먼저** 본다 — 이 줄이 없으면 아래 단언은 "원래 없던 것"을 확인한다.
+    expect(await memoOf(fx.duesEntryId)).toBe('2026-02 민지');
+    expect(await memoOf(fx.cancelledDuesEntryId)).toBe('2026-02 민지');
+    expect(await memoOf(fx.twinDuesEntryId)).toBe('2026-02 민지');
+
+    expect((await withdraw(fx.leaver))?.serverError).toBeUndefined();
+
+    expect(await memoOf(fx.duesEntryId), '살아 있는 납부 메모에 탈퇴자의 이름이 남았다').toBe(
+      `2026-02 ${ANONYMOUS_MEMBER_NAME}`,
+    );
+    expect(
+      await memoOf(fx.cancelledDuesEntryId),
+      '취소된 납부 메모에 탈퇴자의 이름이 남았다 — dues_payments 행이 없는 경로를 못 타고 있다',
+    ).toBe(`2026-02 ${ANONYMOUS_MEMBER_NAME}`);
+    // 역분개 메모는 앱이 쓴 **상수**다(이름이 들어가지 않는다) — 다시 쓸 이유가 없다.
+    expect(await memoOf(fx.reversalEntryId), '역분개 메모가 바뀌었다').toBe('납부 취소');
+    expect(
+      await memoOf(fx.twinDuesEntryId),
+      '동명이인의 납부 메모까지 지웠다 — 키가 아니라 이름 문자열로 찾고 있다',
+    ).toBe('2026-02 민지');
+    // 사용자가 타이핑한 지출 메모는 범위 밖이다(ADR-004 결정 2b의 남은 절반).
+    expect(await memoOf(fx.leaverEntryId), '사용자가 적은 지출 메모가 파기됐다').toContain(
+      fx.leaver.email,
+    );
+
+    // 메모만 다시 쓴다 — 금액·행 수·납부 기록은 한 글자도 바뀌지 않는다.
+    const after = await moneyState(fx.gid);
+    for (const key of ['balance', 'entries', 'payments', 'members'] as const) {
+      expect(after[key], `${key}가 변했다 — 메모 파기가 금액·행을 건드렸다`).toBe(before[key]);
+    }
+    // 과거 회차가 '미납'으로 돌아가지 않는다(멤버십·납부 행을 남기는 이유 — ADR-004).
+    const paid = await db
+      .select()
+      .from(duesPayments)
+      .where(eq(duesPayments.roundId, fx.roundId));
+    expect(
+      paid.map((p) => p.membershipId).sort(),
+      '납부 기록이 사라졌다 — 낸 사람이 안 낸 사람이 됐다',
+    ).toEqual([fx.leaverMembershipId, fx.twinMembershipId].sort());
   });
 
   it('6. 총무는 탈퇴할 수 없다 — OWNS_GROUPS이고 아무것도 바뀌지 않는다', async () => {

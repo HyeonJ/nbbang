@@ -3,6 +3,7 @@ import {
   createGroup,
   exactAmount,
   groupForbiddenValues,
+  INVITE_JOIN_URL,
   newClientContext,
   signUp,
   testEmail,
@@ -41,16 +42,27 @@ const ORIGIN = 'http://localhost:3000';
  */
 const ACCOUNT_LABEL = '누출탐지은행 0000-ACCT-LEAK-PUBLIC-7391 민지';
 
+/**
+ * **탈퇴할 멤버의 표시 이름** — 계좌 문구와 같은 이유로 다른 어떤 픽스처도 만들 수 없는 값이다.
+ * 원시 HTML에서 이 문자열이 하나라도 잡히면 출처를 따질 필요가 없다: 탈퇴자의 이름이 샌 것이다.
+ * (회비 납부 메모는 **앱이** `` `${period} ${displayName}` ``으로 쓴다 — `markPaid`.)
+ */
+const LEAVER_NAME = '탈퇴자LEAK7391';
+
 const fx = {
   groupId: '',
   publicToken: '',
   inviteToken: '',
   /** 공개 링크 전체 URL(재발급 전). */
   publicUrl: '',
+  /** 탈퇴한 멤버의 **원래** 이메일 — 탈퇴 후에는 DB에 남지 않으므로 여기 들고 있는다. */
+  leaverEmail: '',
 };
 
 let ownerCtx: BrowserContext;
 let ownerPage: Page;
+/** 탈퇴하는 멤버. 합류 → 회비 납부 → 탈퇴까지 가고, 그 뒤로는 쓰지 않는다(세션이 죽는다). */
+let leaverCtx: BrowserContext;
 /** 쿠키가 하나도 없는 방문자 — 공개 링크가 정말 로그인 없이 열리는지 보는 컨텍스트. */
 let anonCtx: BrowserContext;
 
@@ -167,8 +179,37 @@ test.describe('공개 장부 — 링크 하나로 열리되 그 밖의 것은 �
     await ownerPage.getByTestId('round-amount').fill('20000');
     await ownerPage.getByTestId('round-create').click();
     await expect(ownerPage).toHaveURL(/\/dues\/[^/]+$/);
+    const roundId = new URL(ownerPage.url()).pathname.split('/').pop()!;
     await ownerPage.getByTestId('payment-toggle').click();
     await expect(ownerPage.getByTestId('round-total-collected')).toHaveText(/20,000/);
+
+    // ── 탈퇴할 멤버를 합류시키고 그 사람의 회비를 받는다 (§8 P0) ───────────────
+    /**
+     * 공개 장부의 **기록 줄**에 앱이 쓴 이름을 심기 위한 준비다. `markPaid`는 납부 원장 메모를
+     * `` `${period} ${displayName}` ``으로 적는다 — 사용자가 적은 글이 아니고, 회비를 한 번이라도
+     * 낸 멤버는 선택과 무관하게 이 줄을 갖는다. 그 사람이 탈퇴한 뒤에도 이름이 남으면 **링크를
+     * 가진 누구나** 파기를 요청한 사람의 이름을 읽는다(그것이 P0 결함이었다).
+     */
+    await ownerPage.goto(`/groups/${fx.groupId}/settings`);
+    const inviteLocator = ownerPage.getByTestId('invite-link');
+    await expect(inviteLocator).toContainText(`${ORIGIN}/invite/`);
+    const invite = (await inviteLocator.innerText()).trim();
+
+    fx.leaverEmail = testEmail('public', 'leaver');
+    leaverCtx = await newClientContext(browser);
+    const leaverPage = await leaverCtx.newPage();
+    await leaverPage.goto(invite);
+    await leaverPage.getByTestId('join-login-link').click();
+    await signUp(leaverPage, { name: LEAVER_NAME, email: fx.leaverEmail });
+    await expect(leaverPage).toHaveURL(INVITE_JOIN_URL);
+    await leaverPage.getByTestId('join-display-name').fill(LEAVER_NAME);
+    await leaverPage.getByTestId('join-submit').click();
+    await expect(leaverPage).toHaveURL(/\/groups\/[^/]+$/);
+
+    await ownerPage.goto(`/groups/${fx.groupId}/dues/${roundId}`);
+    // 토글이 둘(민지=납부 완료 안쪽, 탈퇴자=미납)이므로 testid로는 좁혀지지 않는다 — 이름으로 집는다.
+    await ownerPage.getByRole('button', { name: `${LEAVER_NAME} 납부 체크` }).click();
+    await expect(ownerPage.getByTestId('round-total-collected')).toHaveText(/40,000/);
 
     // ── 입금 계좌를 설정한다 (Task 10) ────────────────────────────────────────
     // 이 값이 저장돼 있어야 "공개 장부에 계좌가 없다"는 단언이 내용을 갖는다 —
@@ -189,22 +230,43 @@ test.describe('공개 장부 — 링크 하나로 열리되 그 밖의 것은 �
     // 128비트 base64url = 22자. 초대 토큰(12자)과 길이로도 구별된다.
     expect(fx.publicToken, '공개 토큰이 128비트가 아니다').toHaveLength(22);
 
+    // ── 덫이 실렸는지 **탈퇴 전에** 확인한다 ──────────────────────────────────
+    // 이 줄이 없으면 아래 금칙 검사는 "원래 없던 것"을 확인하고 초록이 된다.
+    const beforeHtml = await (await ownerCtx.request.get(fx.publicUrl)).text();
+    expect(beforeHtml, '공개 장부 기록 줄에 멤버 이름이 없다 — 덫이 실리지 않았다').toContain(
+      `2026-01 ${LEAVER_NAME}`,
+    );
+
+    // ── 그 멤버가 탈퇴한다 ────────────────────────────────────────────────────
+    const leaverAccount = await leaverCtx.newPage();
+    await leaverAccount.goto('/account');
+    await leaverAccount.getByTestId('delete-account-confirm').fill('탈퇴합니다');
+    await leaverAccount.getByTestId('delete-account').click();
+    await expect(leaverAccount, '탈퇴 후 랜딩으로 이동하지 않았다').toHaveURL(`${ORIGIN}/`);
+    await leaverAccount.close();
+
     // ── 금칙 목록 — 공용 목록에서 publicToken 하나만 덜어낸다 ─────────────────
     // 덜어내는 이유는 파일 머리말의 마지막 단락과 같다(주소창에 있는 값이다). 나머지는 전부
-    // 검사한다 — 초대 토큰·groupId·이메일·userId·세션 토큰·**계좌 문구**.
-    const all = await groupForbiddenValues(fx.groupId);
+    // 검사한다 — 초대 토큰·groupId·이메일·userId·세션 토큰·계좌 문구·**탈퇴자의 표시 이름**.
+    const all = await groupForbiddenValues(fx.groupId, [
+      { displayName: LEAVER_NAME, email: fx.leaverEmail },
+    ]);
     forbidden.push(...all.filter((f) => f.value !== fx.publicToken));
     expect(
       forbidden.map((f) => f.label),
       '계좌 문구가 금칙 목록에 없다 — Task 10의 규칙 절반이 검사되지 않는다',
     ).toContain('accountLabel(입금 계좌 문구)');
+    expect(
+      forbidden.map((f) => f.label),
+      '탈퇴자의 표시 이름이 금칙 목록에 없다 — P0 수정이 검사되지 않는다',
+    ).toContain(`탈퇴자의 모임 표시 이름(${LEAVER_NAME})`);
     fx.inviteToken = all.find((f) => f.label.startsWith('inviteToken'))!.value;
 
     anonCtx = await newClientContext(browser);
   });
 
   test.afterAll(async () => {
-    await Promise.all([ownerCtx?.close(), anonCtx?.close()]);
+    await Promise.all([ownerCtx?.close(), leaverCtx?.close(), anonCtx?.close()]);
   });
 
   test('쿠키 없는 방문자가 링크만으로 장부를 본다', async () => {
@@ -214,17 +276,22 @@ test.describe('공개 장부 — 링크 하나로 열리되 그 밖의 것은 �
 
     await page.goto(fx.publicUrl);
     await expect(page.getByTestId('public-group-name')).toHaveText('공개모임');
-    // 잔액 = 회비 20,000 − 지출 9,000 (48,000은 정정돼 상쇄) = 11,000
-    await expect(page.getByTestId('public-balance')).toHaveText(exactAmount('11,000'));
-    await expect(page.getByTestId('public-member')).toHaveCount(1);
+    // 잔액 = 회비 20,000 × 2 − 지출 9,000 (48,000은 정정돼 상쇄) = 31,000
+    await expect(page.getByTestId('public-balance')).toHaveText(exactAmount('31,000'));
+    await expect(page.getByTestId('public-member')).toHaveCount(2);
     await expect(page.getByTestId('public-member').first()).toContainText('민지');
+    // 탈퇴자의 **자리는 남고 이름만 바뀐다** — 지우면 그 사람이 낸 회비가 없던 일이 된다(ADR-004).
+    await expect(
+      page.getByTestId('public-member').filter({ hasText: '탈퇴한 멤버' }),
+      '탈퇴자의 멤버 자리가 사라졌거나 이름이 그대로다',
+    ).toHaveCount(1);
 
     /**
      * 원장 **전부** — 지출 2 + 정정 1 + 회비 납부 1 = 4행 (direction.md Q3의 예외 = A).
      * 지출 화면은 정정을 원본에 접어 넣어 2행만 보이지만, 이 화면은 목적이 검증이므로
      * 원본과 정정이 **둘 다** 행으로 남아야 한다. 이 숫자가 그 규칙을 고정한다.
      */
-    await expect(page.getByTestId('public-entry-row')).toHaveCount(4);
+    await expect(page.getByTestId('public-entry-row')).toHaveCount(5);
     // 정정된 원본과 그 정정 행이 둘 다 보인다.
     await expect(page.getByTestId('public-entry-row').filter({ hasText: '정정됨' })).toHaveCount(1);
     await expect(page.getByTestId('public-entry-row').filter({ hasText: '↳ 정정' })).toHaveCount(1);
@@ -241,6 +308,14 @@ test.describe('공개 장부 — 링크 하나로 열리되 그 밖의 것은 �
     // 검사 대상이 실제 장부 화면인지 먼저 확인한다 — 엉뚱한 페이지를 검사하고 초록이 되면 안 된다.
     expect(html, '장부 화면이 아니다').toContain('공개모임');
     expectNoLeaks(html, '공개 장부 200');
+    /**
+     * **회차 기간은 남는다** — '2026-01'은 사람의 식별자가 아니라 그 입금이 어느 회차의 것인지다.
+     *
+     * ⚠️ 이 단언은 `expectNoLeaks` **뒤**에 둔다. 앞에 두면 메모 파기를 끈 변이에서 이 줄이
+     * 먼저 빨개져(기간만 남은 줄이 없으므로) 금칙 목록이 일하는 모습을 가린다 — Task 10이
+     * CSV 헤더 단언으로 겪은 그 순서 문제다. 빨개져야 하는 것은 금칙 목록이다.
+     */
+    expect(html, '회비 납부 줄의 회차 기간까지 지워졌다').toContain('2026-01 탈퇴한 멤버');
   });
 
   test('응답 헤더가 캐시·리퍼러·색인을 모두 막는다', async () => {
