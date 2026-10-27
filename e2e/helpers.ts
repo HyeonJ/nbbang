@@ -132,8 +132,19 @@ export type Forbidden = { label: string; value: string };
  * 값이 빈 금칙 항목은 `not.toContain('')`이 되어 항상 통과하는 헛된 단언이다. 특히
  * `accountLabel`은 스펙이 설정 화면에서 **먼저 저장해 둬야** 한다 — 안 하면 이 검사는
  * 아무것도 지키지 않으므로, 준비를 빠뜨린 것을 조용히 통과시키지 않고 여기서 깬다.
+ *
+ * ── 탈퇴자의 이름·이메일은 **DB에서 모아 올 수 없다** (§8 P0 수정) ──────────
+ * 탈퇴는 그 두 값을 바로 덮어쓴다(`memberships.display_name` → '탈퇴한 멤버',
+ * `user.email` → `deleted-<uuid>@deleted.invalid`). 즉 금칙 검사를 할 시점에 **DB에는
+ * 원래 값이 없다** — 그래서 이 함수가 캐내는 대신 호출자가 `withdrawn`으로 넘긴다.
+ * 그 값들이 출력에 남아 있으면, 파기를 요청한 사람의 이름이 공개 장부·CSV로 계속 나가는
+ * 것이다(그것이 P0 결함이었다: `markPaid`가 회비 납부 메모를 **앱이** 적는다).
  */
-export async function groupForbiddenValues(groupId: string): Promise<Forbidden[]> {
+export async function groupForbiddenValues(
+  groupId: string,
+  /** 이미 탈퇴한 멤버의 **원래** 표시 이름(필요하면 이메일까지). 호출자만 알고 있는 값이다. */
+  withdrawn: { displayName: string; email?: string }[] = [],
+): Promise<Forbidden[]> {
   const sql = neon(process.env.DATABASE_URL!);
 
   const [group] = (await sql`
@@ -165,6 +176,13 @@ export async function groupForbiddenValues(groupId: string): Promise<Forbidden[]
     ...users.map((u) => ({ label: `이메일(${u.email})`, value: u.email })),
     ...users.map((u) => ({ label: `userId(auth user.id) ${u.id}`, value: u.id })),
     ...sessions.map((s, i) => ({ label: `세션 토큰 #${i}`, value: s.token })),
+    ...withdrawn.map((w) => ({
+      label: `탈퇴자의 모임 표시 이름(${w.displayName})`,
+      value: w.displayName,
+    })),
+    ...withdrawn.flatMap((w) =>
+      w.email ? [{ label: `탈퇴자의 원래 이메일(${w.email})`, value: w.email }] : [],
+    ),
   ];
   for (const { label, value } of list) {
     expect(value, `금칙 값 ${label}이 비어 있다 — 준비가 잘못됐다`).toBeTruthy();

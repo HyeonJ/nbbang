@@ -14,12 +14,19 @@ import { PageHeader } from '@/components/ui/page-header';
  *  - 수집 항목·보관기간   → `lib/client-ip.ts`(IP HMAC) · `app/api/cron/cleanup/route.ts`(48시간)
  *                          · `lib/db/auth-schema.ts`(session.ip_address·user_agent) · `lib/auth.ts`
  *  - 탈퇴 시 파기·보존    → `lib/db/anonymize.ts` + `docs/adr/004-deletion-semantics.md`
+ *                          · 회비 납부 메모를 **앱이** 적는 자리는 `actions/dues.ts`의 `markPaid`
  *  - 모임 삭제            → `lib/db/delete.ts`
  *  - 공개 장부 노출 범위  → `lib/db/public-queries.ts` · `middleware.ts`(분당 60회)
  *
  * ⚠️ **"24시간"이라고 적지 않는다.** Vercel Hobby는 1일 1회 크론이 최소이고 실행 시각이
  * ±59분, 배달이 best effort다. 임계값 1시간 + 최악의 다음 실행 ≈ 26시간이고, 한 번의 실행
  * 누락까지 감안한 정직한 상한이 **48시간**이다(`app/api/cron/cleanup/route.ts`의 계산).
+ *
+ * ⚠️ **2026-10-27 개정: 회비 납부 메모의 이름도 파기된다.** 이전 판에는 "탈퇴해도 그 줄의
+ * 이름은 남고 공개 장부에 보인다"는 오렌지 괘선 고지가 있었다(ADR-004가 몰랐던 경로였고
+ * `requirements.md` §8의 P0였다). 그 결함을 고쳤으므로 이 페이지도 **사실을 따라** 바뀌었다 —
+ * 그 줄은 이제 '파기되는 것' 표에 있고, 남는 것 쪽에는 **직접 적은 글**만 남는다.
+ * 경계는 "자유 텍스트인가"가 아니라 **"누가 적었는가"** 다(ADR-004 결정 2(b) 개정).
  *
  * ⚠️ **세션 IP는 이제 저장하지 않는다 — 그러나 그것은 기본 동작이 아니다.**
  * Better Auth는 세션을 만들 때 `session` 행에 접속 IP와 User-Agent를 평문으로 적는다
@@ -39,7 +46,7 @@ import { PageHeader } from '@/components/ui/page-header';
 export const metadata = { title: '개인정보처리방침' };
 
 /** 시행일. 내용을 고치면 이 값도 함께 고친다. */
-const EFFECTIVE_DATE = '2026년 9월 17일';
+const EFFECTIVE_DATE = '2026년 10월 27일';
 
 const H2 = 'font-display text-[12px] font-bold tracking-[0.14em] text-ink uppercase';
 const BODY = 'text-[14px] leading-[1.85] text-muted';
@@ -153,7 +160,7 @@ export default function PrivacyPage() {
 
       <Section title="탈퇴하면 지워지는 것">
         <p className={BODY}>
-          계정 설정에서 탈퇴하면 아래 여덟 가지가 그 자리에서 파기됩니다. 되돌릴 수 없고 유예기간은
+          계정 설정에서 탈퇴하면 아래 아홉 가지가 그 자리에서 파기됩니다. 되돌릴 수 없고 유예기간은
           없습니다.
         </p>
         <div className="mt-5">
@@ -166,6 +173,16 @@ export default function PrivacyPage() {
             <Line term="이메일 인증·비밀번호 재설정 토큰" value="삭제" />
             <Line term="모임 표시 이름" value="&lsquo;탈퇴한 멤버&rsquo;로 대체" />
             <Line term="과거 정산에 굳어 있던 표시 이름" value="&lsquo;탈퇴한 멤버&rsquo;로 대체" />
+            <Line
+              term="회비 납부 기록의 메모"
+              detail="총무가 납부를 체크하면 엔빵이 장부에 '2026-01 철수'처럼 자동으로 적는 줄입니다. 직접 입력한 글이 아닙니다."
+              value={
+                <>
+                  이름만 &lsquo;탈퇴한 멤버&rsquo;로 대체
+                  <span className="mt-1 block">회차(2026-01)는 남습니다</span>
+                </>
+              }
+            />
           </DataTable>
         </div>
         <p className={`mt-5 ${NOTE}`}>
@@ -176,8 +193,9 @@ export default function PrivacyPage() {
 
       <Section title="탈퇴해도 남는 것">
         <p className={BODY}>
-          파기 범위는 위에 적은 <b className="font-bold text-ink">여덟 가지 구조화된 식별자</b>입니다. 그
-          밖의 것은 남습니다. 숨기지 않고 적습니다.
+          파기 범위는 위에 적은 <b className="font-bold text-ink">아홉 가지</b>입니다 — 계정·모임·정산의
+          구조화된 식별자 여덟 가지와, <b className="font-bold text-ink">엔빵이 자동으로 적은</b> 회비 납부
+          메모의 이름입니다. 그 밖의 것은 남습니다. 숨기지 않고 적습니다.
         </p>
         <div className="mt-5">
           <DataTable>
@@ -201,16 +219,6 @@ export default function PrivacyPage() {
               detail="지출 메모 · 입금 계좌 문구 · 정산 제목"
               value="그대로 남습니다"
             />
-            <Line
-              term="회비 납부 기록의 메모"
-              detail="회비를 낼 때 엔빵이 '2026-01 철수'처럼 회차와 모임 표시 이름을 자동으로 적습니다. 직접 입력한 글이 아닙니다."
-              value={
-                <>
-                  탈퇴해도 이름이 남습니다
-                  <span className="mt-1 block">공개 링크에도 보입니다</span>
-                </>
-              }
-            />
           </DataTable>
         </div>
         <ul className={`mt-6 space-y-3 ${NOTE}`}>
@@ -229,13 +237,14 @@ export default function PrivacyPage() {
             필요하면 탈퇴하기 전에 직접 고치거나, 총무라면 모임을 삭제하세요.
           </li>
           <li className="border-l-2 border-accent pl-4 text-ink">
-            <b className="font-bold">회비 납부 기록의 메모는 직접 적은 글이 아닙니다.</b> 총무가 회비
-            납부를 체크하면 엔빵이 장부에 &lsquo;2026-01 철수&rsquo; 같은 줄을 자동으로 적습니다. 그래서
-            탈퇴해서 모임 표시 이름이 &lsquo;탈퇴한 멤버&rsquo;로 바뀌어도{' '}
-            <b className="font-bold">그 줄에 적힌 이름은 남고, 공개 장부 링크를 가진 사람에게도 보입니다.</b>{' '}
-            이것은 의도한 설계가 아니라 뒤늦게 발견한 한계입니다 — 고치는 것을 다음 작업으로 올려
-            두었고, 그때까지 사실대로 적어 둡니다. 이름이 남는 것이 문제라면 탈퇴 전에 총무에게
-            모임 삭제를 요청하세요(모임을 삭제하면 그 줄도 함께 사라집니다).
+            <b className="font-bold">경계는 &lsquo;자유 텍스트인가&rsquo;가 아니라 &lsquo;누가 적었는가&rsquo;입니다.</b>{' '}
+            총무가 회비 납부를 체크하면 엔빵이 장부에 &lsquo;2026-01 철수&rsquo; 같은 줄을{' '}
+            <b className="font-bold">자동으로</b> 적습니다 — 본인이 선택해서 쓴 글이 아닙니다. 그래서 탈퇴할 때{' '}
+            <b className="font-bold">그 줄의 이름도 &lsquo;탈퇴한 멤버&rsquo;로 바뀌고, 공개 장부 링크를 가진
+            사람에게도 더 이상 보이지 않습니다.</b> 회차(&lsquo;2026-01&rsquo;)는 남습니다 — 그것은 사람을
+            가리키는 값이 아니라 그 입금이 어느 달 회비인지이고, 지우면 남은 멤버들의 장부가 무엇을
+            뜻하는지 알 수 없게 됩니다. 반대로 <b className="font-bold">직접 적은 글</b>(지출 메모·입금
+            계좌 문구·정산 제목)은 위 표대로 남습니다.
           </li>
           <li>
             <b className="font-bold text-ink">총무는 바로 탈퇴할 수 없습니다.</b> 소유한 모임이 있으면 그

@@ -318,6 +318,67 @@ test('지출·회비가 잔액에 정확히 반영되고 정정으로 되돌아�
   // 브라우저가 Content-Disposition의 이름을 그대로 쓴다 — 한글 이름이 filename*로 살아 있는 증거.
   expect(file.suggestedFilename()).toMatch(/^nbbang-정산모임-\d{4}-\d{2}-\d{2}\.csv$/);
 
+  // ── 11) 탈퇴자의 이름이 CSV에서 사라진다 (§8 P0) ─────────────────────────────
+  /**
+   * 회비 납부 메모는 **앱이** `` `${period} ${displayName}` ``으로 쓴다(`markPaid`) — 사용자가
+   * 적은 글이 아니다. 그래서 탈퇴 후에도 남으면, 파기를 요청한 사람의 이름이 **파일로 재유통**된다.
+   *
+   * 순서가 이 검사의 전부다: ① 먼저 철수의 납부를 체크해 메모에 이름을 **싣고**, ② 그것이
+   * 파일에 들어 있음을 확인하고(덫이 실렸다는 증거 — 없으면 아래 단언은 "원래 없던 것"을 본다),
+   * ③ 철수가 탈퇴한 뒤 ④ 같은 파일을 다시 받아 이름이 사라졌는지 본다.
+   * 멤버 쪽 다운로드 확인(위)을 **먼저** 끝내는 이유: 탈퇴하면 그 세션이 즉시 죽는다.
+   */
+  const csvBody = async () => {
+    const r = await ownerContext.request.get(exportUrl);
+    expect(r.status(), 'CSV 재요청이 200이 아니다').toBe(200);
+    return (await r.body()).toString('utf8');
+  };
+
+  await op.goto(`/groups/${groupId}/dues/${roundId}`);
+  // 토글이 둘(민지=납부 완료 안쪽, 철수=미납)이므로 testid로는 좁혀지지 않는다 — 이름으로 집는다.
+  await op.getByRole('button', { name: '철수 납부 체크' }).click();
+  await expect(op.getByTestId('round-total-collected')).toHaveText(exactAmount('40,000'));
+
+  expect(await csvBody(), '회비 납부 메모에 멤버 이름이 없다 — 덫이 실리지 않았다').toContain(
+    '2026-01 철수',
+  );
+
+  await mp.goto('/account');
+  await mp.getByTestId('delete-account-confirm').fill('탈퇴합니다');
+  await mp.getByTestId('delete-account').click();
+  await expect(mp, '탈퇴 후 랜딩으로 이동하지 않았다').toHaveURL('http://localhost:3000/');
+
+  const csvAfter = await csvBody();
+  expect(csvAfter, '탈퇴 후에도 회비 납부 메모에 탈퇴자의 이름이 남아 있다').not.toContain(
+    '2026-01 철수',
+  );
+  // **회차 기간은 남는다** — '2026-01'은 사람의 식별자가 아니라 어느 회차의 입금인지다.
+  expect(csvAfter, '회차 기간까지 지워졌다 — 기간은 식별자가 아니다').toContain(
+    '2026-01 탈퇴한 멤버',
+  );
+  // 금액·행 수는 불변이다: 회비 납부 3줄(민지 납부 + 재납부, 철수 납부) — 취소는 '정정' 줄이다.
+  expect(csvAfter.match(/,회비 납부,20000,회비,/g), '회비 납부 줄 수가 변했다').toHaveLength(3);
+
+  const forbiddenAfter = await groupForbiddenValues(groupId, [
+    { displayName: '철수', email: memberEmail },
+  ]);
+  expect(
+    forbiddenAfter.map((f) => f.label),
+    '탈퇴자의 표시 이름이 금칙 목록에 없다 — P0 수정의 절반이 검사되지 않는다',
+  ).toContain('탈퇴자의 모임 표시 이름(철수)');
+  for (const { label, value } of forbiddenAfter) {
+    expect(csvAfter, `CSV에 ${label}이 들어 있다`).not.toContain(value);
+  }
+
+  // 과거 회차가 '미납'으로 돌아가지 않는다 — 멤버십·납부 기록을 남기는 이유다(ADR-004).
+  await op.goto(`/groups/${groupId}/dues/${roundId}`);
+  await expect(op.getByTestId('round-total-collected')).toHaveText(exactAmount('40,000'));
+  await expect(op.getByTestId('round-total-outstanding')).toHaveText(exactAmount('0'));
+  await expect(
+    op.getByTestId('paid-details'),
+    '탈퇴자가 납부 완료에서 사라졌다 — 낸 사람이 안 낸 사람이 됐다',
+  ).toContainText('탈퇴한 멤버');
+
   await ownerContext.close();
   await memberContext.close();
 });
