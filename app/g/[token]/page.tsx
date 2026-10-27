@@ -50,7 +50,10 @@ export const metadata: Metadata = {
 
 /**
  * 원장 한 행의 이름표. 공개 장부는 **원장을 그대로** 보여주므로 REVERSAL도 한 행을 차지한다.
- * 회비 납부는 메모가 없는 대신 종류로 읽히게 한다.
+ *
+ * 회비 납부의 메모는 **앱이** `` `${period} ${displayName}` ``으로 쓴다(`markPaid`) — 그래서 이
+ * 화면은 그 멤버의 표시 이름을 **로그인 없이** 보여준다. 탈퇴하면 그 줄은
+ * `` `${period} 탈퇴한 멤버` `` 가 된다(ADR-004 결정 2(b-1)). 메모가 비어 있는 엔트리만 종류로 읽힌다.
  */
 function labelOf(e: PublicLedgerEntry): string {
   if (e.type === 'REVERSAL') return '정정';
