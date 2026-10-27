@@ -901,6 +901,9 @@ update "ledger_entries" set "memo" = case
    `gh secret set TEST_DATABASE_URL`(+ 필요하면 프로덕션 env).
 2. `npm run db:migrate` · `npm run db:migrate:test` — `0007`이 적용되는 것을 **SQL을 읽고** 확인.
 3. `npm run test:integration` → **5c가 초록인지**가 이 변경의 본체다.
+   공백 자체(= `dues_payments` 경로가 취소된 납부를 놓치는 것)를 **관측**하려면
+   `verify/dues-memo-gap` 브랜치(PR #4, 병합 금지)가 그 구현을 들고 있다 — 거기서 5c가
+   빨개지는 것을 보고 브랜치를 지우면 된다. 그 브랜치는 그 관측만을 위해 남겨 뒀다.
 4. `npm run build` → `npm run e2e` → 공개 장부·CSV 금칙 목록(탈퇴자 이름 포함)이 초록인지.
 5. **변이 증명**: `lib/db/anonymize.ts`의 1-b 블록을 주석 처리하고 e2e를 다시 돌린다.
    기대: `공개 장부 200: 원시 응답 본문에 탈퇴자의 모임 표시 이름(탈퇴자LEAK7391)이 들어 있다` ·
