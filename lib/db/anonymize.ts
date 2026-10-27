@@ -1,6 +1,15 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { db } from '.';
-import { account, memberships, session, settlementParticipants, user, verification } from './schema';
+import {
+  account,
+  duesPayments,
+  ledgerEntries,
+  memberships,
+  session,
+  settlementParticipants,
+  user,
+  verification,
+} from './schema';
 
 /**
  * **파기되는 것의 전체 목록**이다 — 회원 탈퇴 판(ADR-004).
@@ -70,6 +79,10 @@ export const ERASED_ROW_TABLES: readonly string[] = ['account', 'session', 'veri
  * 남지 않았는지 확인하고, ② 이 목록 + `ERASED_ROW_TABLES` + 테스트의 "식별자 아님" 분류가
  * 여섯 테이블의 텍스트 컬럼 **전부**를 덮는지 대조한다. 컬럼이 추가되면 그 대조가 먼저 빨개진다.
  */
+export const ERASED_APP_WRITTEN_COLUMNS: readonly (readonly [string, string])[] = [
+  ['ledger_entries', 'memo'],
+];
+
 export const ERASED_IDENTIFIER_COLUMNS: readonly (readonly [string, string])[] = [
   ['user', 'email'],
   ['user', 'name'],
@@ -111,6 +124,25 @@ export async function anonymizeUserRows(tx: Tx, userId: string, email: string): 
       .update(memberships)
       .set({ displayName: ANONYMOUS_MEMBER_NAME })
       .where(eq(memberships.userId, userId));
+
+    // ── PROBE: ADR-004 정정 절이 적은 dues_payments 경로 ───────────────────
+    const paid = await tx
+      .select({ entryId: duesPayments.ledgerEntryId })
+      .from(duesPayments)
+      .where(inArray(duesPayments.membershipId, membershipIds));
+    const entryIds = paid.map((p) => p.entryId);
+    if (entryIds.length > 0) {
+      await tx
+        .update(ledgerEntries)
+        .set({
+          memo: sql`case
+              when left(${ledgerEntries.memo}, 8) ~ '^[0-9]{4}-[0-9]{2} '
+                then left(${ledgerEntries.memo}, 7) || ' ' || ${ANONYMOUS_MEMBER_NAME}
+              else ${ANONYMOUS_MEMBER_NAME}
+            end`,
+        })
+        .where(inArray(ledgerEntries.id, entryIds));
+    }
   }
 
   // ── 2. 자격증명·세션 (행째로) ────────────────────────────────────────────
