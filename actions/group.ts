@@ -1,6 +1,6 @@
 'use server';
 import { z } from 'zod';
-import { ActionError, authActionClient, groupActionClient, assertOwner } from './clients';
+import { ActionError, authActionClient, displayNameOrThrow, groupActionClient, assertOwner } from './clients';
 import { db } from '@/lib/db';
 import { assertActiveUser } from '@/lib/db/anonymize';
 import { deleteGroupRows } from '@/lib/db/delete';
@@ -15,6 +15,7 @@ export const createGroup = authActionClient
     displayName: z.string().min(1).max(20),
   }))
   .action(async ({ parsedInput, ctx }) => {
+    const displayName = displayNameOrThrow(parsedInput.displayName);
     const groupId = crypto.randomUUID();
     await db.transaction(async (tx) => {
       await assertActiveUser(tx, ctx.userId);
@@ -25,7 +26,7 @@ export const createGroup = authActionClient
       });
       await tx.insert(memberships).values({
         id: crypto.randomUUID(), userId: ctx.userId, groupId,
-        role: 'owner', displayName: parsedInput.displayName,
+        role: 'owner', displayName,
       });
     });
     revalidatePath('/groups');

@@ -32,6 +32,20 @@ describe('parseDisplayName', () => {
     expect(thrownCode(() => parseDisplayName('탈퇴한  멤버'))).toBe('RESERVED_NAME');
   });
 
+  it('보이지 않는 문자만 있으면 INVALID_NAME', () => {
+    expect(thrownCode(() => parseDisplayName('\u200B'))).toBe('INVALID_NAME');
+    expect(thrownCode(() => parseDisplayName(' \uFEFF\u200D '))).toBe('INVALID_NAME');
+  });
+
+  it('보이지 않는 문자를 끼워도 RESERVED_NAME', () => {
+    expect(thrownCode(() => parseDisplayName('탈퇴한\u200B멤버'))).toBe('RESERVED_NAME');
+    expect(thrownCode(() => parseDisplayName('탈퇴한 멤버\uFEFF'))).toBe('RESERVED_NAME');
+  });
+
+  it('앞뒤의 보이지 않는 문자는 저장하지 않는다', () => {
+    expect(parseDisplayName('\u200B철수\uFEFF ')).toBe('철수');
+  });
+
   it('비슷하지만 다른 이름은 통과한다', () => {
     expect(parseDisplayName('탈퇴한 멤버2')).toBe('탈퇴한 멤버2');
   });

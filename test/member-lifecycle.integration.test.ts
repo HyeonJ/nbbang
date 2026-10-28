@@ -32,6 +32,7 @@ vi.mock('@/lib/auth', () => ({
   },
 }));
 
+const { createGroup } = await import('@/actions/group');
 const { createExpense } = await import('@/actions/ledger');
 const { createSettlement } = await import('@/actions/settlement');
 const { createRound, markPaid, addToRound, removeFromRound } = await import('@/actions/dues');
@@ -462,5 +463,55 @@ describe('초대 링크로 다시 들어오기 (D4)', () => {
       groupId: g.gid,
       already: true,
     });
+  });
+});
+
+describe('표시 이름 검증', () => {
+  it('합류 이름은 앞뒤 공백을 잘라 저장한다', async () => {
+    const g = await seedGroup();
+    const u = await addMember(g.gid, '임시', 'member');
+    await db.delete(memberships).where(eq(memberships.id, u.membershipId));
+    session.userId = u.userId;
+    expect((await joinByInvite({ token: g.inviteToken, displayName: '  철수 ' })).serverError).toBeUndefined();
+    const [m] = await db
+      .select()
+      .from(memberships)
+      .where(and(eq(memberships.groupId, g.gid), eq(memberships.userId, u.userId)));
+    expect(m.displayName).toBe('철수');
+  });
+
+  it('공백만 있는 이름은 INVALID_NAME, 파기 표지는 RESERVED_NAME — 아무것도 저장되지 않는다', async () => {
+    const g = await seedGroup();
+    const u = await addMember(g.gid, '임시', 'member');
+    await db.delete(memberships).where(eq(memberships.id, u.membershipId));
+    session.userId = u.userId;
+
+    expect((await joinByInvite({ token: g.inviteToken, displayName: '   ' })).serverError).toBe('INVALID_NAME');
+    expect((await joinByInvite({ token: g.inviteToken, displayName: '탈퇴한 멤버' })).serverError).toBe(
+      'RESERVED_NAME',
+    );
+    expect(
+      await db.select().from(memberships).where(and(eq(memberships.groupId, g.gid), eq(memberships.userId, u.userId))),
+    ).toHaveLength(0);
+  });
+
+  it('모임을 만들 때 총무 이름도 같은 규칙이다', async () => {
+    const g = await seedGroup();
+    session.userId = g.owner.userId;
+    const before = await db.select().from(groups);
+    expect((await createGroup({ name: '새모임', displayName: '탈퇴한멤버' })).serverError).toBe('RESERVED_NAME');
+    expect((await createGroup({ name: '새모임', displayName: '  ' })).serverError).toBe('INVALID_NAME');
+    expect(await db.select().from(groups)).toHaveLength(before.length);
+  });
+
+  it('재가입 이름도 같은 규칙이다', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    await markLeft(chulsoo, 'left');
+    session.userId = chulsoo.userId;
+    expect((await joinByInvite({ token: g.inviteToken, displayName: '탈퇴한 멤버' })).serverError).toBe(
+      'RESERVED_NAME',
+    );
+    expect((await membershipState(chulsoo)).leftReason).toBe('left');
   });
 });

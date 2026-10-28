@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
-import { ActionError, assertOwner, authActionClient, groupActionClient } from './clients';
+import { ActionError, assertOwner, authActionClient, displayNameOrThrow, groupActionClient } from './clients';
 import { db } from '@/lib/db';
 import { assertActiveUser } from '@/lib/db/anonymize';
 import { isUniqueViolation } from '@/lib/db/errors';
@@ -15,6 +15,7 @@ import { joinDecision } from '@/lib/domain/member';
 export const joinByInvite = authActionClient
   .inputSchema(z.object({ token: z.string(), displayName: z.string().min(1).max(20) }))
   .action(async ({ parsedInput, ctx }) => {
+    const displayName = displayNameOrThrow(parsedInput.displayName);
     const group = await db.query.groups.findFirst({ where: eq(groups.inviteToken, parsedInput.token) });
     if (!group) throw new ActionError('INVALID_INVITE');
     const existing = await db.query.memberships.findFirst({
@@ -29,7 +30,7 @@ export const joinByInvite = authActionClient
     if (decision === 'rejoin' && existing) {
       const rejoined = await db.transaction(async (tx) => {
         await assertActiveUser(tx, ctx.userId);
-        return rejoinLeft(tx, existing.id, parsedInput.displayName);
+        return rejoinLeft(tx, existing.id, displayName);
       });
       if (!rejoined) {
         // 읽은 뒤 상태가 바뀌었다 — 동시 재가입(이미 돌아옴)이거나 총무가 그 사이에 바꿨다.
@@ -52,7 +53,7 @@ export const joinByInvite = authActionClient
         await assertActiveUser(tx, ctx.userId);
         await tx.insert(memberships).values({
           id: crypto.randomUUID(), userId: ctx.userId, groupId: group.id,
-          role: 'member', displayName: parsedInput.displayName,
+          role: 'member', displayName,
         });
       });
     } catch (e) {

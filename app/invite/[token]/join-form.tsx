@@ -7,6 +7,13 @@ import { joinByInvite } from '@/actions/membership';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 
+const ERRORS: Record<string, string> = {
+  INVALID_INVITE: '만료되었거나 잘못된 초대 링크입니다.',
+  INVALID_NAME: '이름을 입력해 주세요.',
+  RESERVED_NAME: '이 이름은 쓸 수 없습니다. 다른 이름을 입력해 주세요.',
+  REMOVED_FROM_GROUP: '이 모임에서 내보내져 링크로 다시 들어올 수 없습니다. 총무에게 문의해 주세요.',
+};
+
 export default function JoinForm({ token }: { token: string }) {
   const router = useRouter();
   const [displayName, setDisplayName] = useState('');
@@ -26,11 +33,9 @@ export default function JoinForm({ token }: { token: string }) {
 
   const serverError = result.serverError;
   const errorMessage =
-    serverError === 'INVALID_INVITE'
-      ? '만료되었거나 잘못된 초대 링크입니다.'
-      : serverError && serverError !== 'UNAUTHENTICATED'
-        ? '합류에 실패했습니다. 잠시 후 다시 시도해 주세요.'
-        : null;
+    serverError && serverError !== 'UNAUTHENTICATED'
+      ? (ERRORS[serverError] ?? '합류에 실패했습니다. 잠시 후 다시 시도해 주세요.')
+      : null;
 
   return (
     <form
