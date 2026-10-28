@@ -73,6 +73,10 @@ describe('assertReversible', () => {
     const rev = entry({ id: 'r', type: 'REVERSAL', reversalOf: 'a' });
     expect(() => assertReversible(rev, [])).toThrow(LedgerRuleError);
   });
+  it('회비 납부는 정정 대상이 아니다 — 납부 취소(unmarkPaid)만이 짝인 납부 기록과 함께 되돌린다', () => {
+    const dues = entry({ id: 'd', type: 'DUES_PAYMENT', amount: 20_000 });
+    expect(thrownCode(() => assertReversible(dues, []))).toBe('NOT_REVERSIBLE');
+  });
   it('다른 엔트리를 가리키는 역분개는 이 엔트리를 막지 않는다', () => {
     const target = entry({ id: 'b' });
     const otherReversal = entry({ id: 'r', type: 'REVERSAL', amount: 1000, reversalOf: 'a' });

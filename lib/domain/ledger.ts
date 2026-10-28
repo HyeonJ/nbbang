@@ -31,13 +31,18 @@ export function reversalAmount(target: LedgerEntryLike): number {
 }
 
 /**
- * 역분개 가능 여부. 같은 대상에 두 번, 역분개의 역분개는 금지한다.
+ * 역분개 가능 여부. 정정 대상은 **지출뿐**이고, 같은 대상에 두 번은 금지한다.
  * 호출자는 target과 같은 모임으로 스코프된 엔트리를 넘겨야 한다 — 그룹 경계는 액션 레이어가 보장한다.
+ *
+ * 회비 납부를 막는 이유: 납부 엔트리에는 `dues_payments` 행이 짝으로 붙어 있고, 그 둘을 함께
+ * 되돌리는 경로는 `unmarkPaid` 하나다. 여기서 엔트리만 역분개하면 원장은 돈이 빠졌는데 회차는
+ * "납부"로 남고, 이후 `unmarkPaid`는 reversal_of 유니크에 걸려 롤백되면서 멱등 성공을 돌려준다 —
+ * 그 납부는 다시는 취소되지 않는다.
  */
 export function assertReversible(
   target: LedgerEntryLike,
   groupEntries: readonly LedgerEntryLike[],
 ): void {
-  if (target.type === 'REVERSAL') throw new LedgerRuleError('NOT_REVERSIBLE');
+  if (target.type !== 'EXPENSE') throw new LedgerRuleError('NOT_REVERSIBLE');
   if (groupEntries.some((e) => e.reversalOf === target.id)) throw new LedgerRuleError('ALREADY_REVERSED');
 }

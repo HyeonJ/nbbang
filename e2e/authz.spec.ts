@@ -657,6 +657,46 @@ test.describe('인가 매트릭스', () => {
   });
 
   /**
+   * 살아 있는 회비 납부를 `reverseEntry`로 겨눈다 — 화면에는 그 버튼이 없지만 서버 액션은
+   * 공개 엔드포인트다(ADR-002). 통과시키면 원장은 돈이 빠지고 회차는 "납부"로 남으며,
+   * 이후 `unmarkPaid`가 reversal_of 유니크에 걸려 **롤백되면서 성공을 돌려준다** — 그 납부는
+   * 영영 취소되지 않는다. 그래서 거부만이 아니라 "그 뒤에도 납부 취소가 실제로 된다"까지 본다.
+   */
+  test('살아 있는 회비 납부는 정정 경로로 되돌릴 수 없다', async () => {
+    await expectAllowed(ownerCtx, 'markPaid', {
+      groupId: fx.gidA,
+      roundId: fx.roundIdA,
+      membershipId: fx.ownerMembershipA,
+    });
+    const [live] = (await sql`
+      select ledger_entry_id from dues_payments
+       where round_id = ${fx.roundIdA} and membership_id = ${fx.ownerMembershipA}`) as {
+      ledger_entry_id: string;
+    }[];
+    expect(live, '준비 실패: 납부 기록이 생기지 않았다').toBeTruthy();
+
+    const baseline = await writeCounts();
+    await expectDenied(
+      ownerCtx,
+      'reverseEntry',
+      { groupId: fx.gidA, entryId: live.ledger_entry_id },
+      'NOT_REVERSIBLE',
+      baseline,
+    );
+
+    await expectAllowed(ownerCtx, 'unmarkPaid', {
+      groupId: fx.gidA,
+      roundId: fx.roundIdA,
+      membershipId: fx.ownerMembershipA,
+    });
+    expect(
+      await sql`select id from dues_payments
+                 where round_id = ${fx.roundIdA} and membership_id = ${fx.ownerMembershipA}`,
+      '납부 취소가 성공을 돌려줬는데 납부 기록이 남아 있다',
+    ).toHaveLength(0);
+  });
+
+  /**
    * 대조군 — 위 거부들이 "재생이 액션에 도달하지 못해서" 난 것이 아님을 보인다.
    * 같은 재생 경로·같은 id로 총무 세션이 일곱 액션 모두 성공시키고 원장·토큰이 실제로 변한다.
    * 이 테스트가 없으면 포획한 id가 엉뚱해도 매트릭스 전체가 초록일 수 있다.

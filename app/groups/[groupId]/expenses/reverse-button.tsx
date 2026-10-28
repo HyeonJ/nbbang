@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 /** 서버가 돌려주는 도메인 코드 → 한국어. 여기 없는 코드는 원문을 노출하지 않고 일반 문구로 덮는다. */
 const ERRORS: Record<string, string> = {
   ALREADY_REVERSED: '이미 정정된 기록입니다.',
-  NOT_REVERSIBLE: '정정 기록은 다시 정정할 수 없습니다.',
+  NOT_REVERSIBLE: '이 기록은 정정할 수 없습니다.',
   ENTRY_NOT_FOUND: '기록을 찾을 수 없습니다.',
   FORBIDDEN: '총무만 정정할 수 있습니다.',
 };
