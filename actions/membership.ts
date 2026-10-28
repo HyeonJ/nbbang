@@ -10,6 +10,8 @@ import { markLeftSelf, markRemoved, rejoinLeft, restoreRemoved } from '@/lib/db/
 import { groups, memberships } from '@/lib/db/schema';
 import { joinDecision } from '@/lib/domain/member';
 
+// 예외: 그룹 대상 쓰기지만 groupActionClient가 아닌 authActionClient 사용.
+// 합류·재가입 시점의 사용자는 활동 중인 멤버가 아니므로 멤버십 검사를 통과할 수 없다 (리뷰 승인된 유일한 비멤버 쓰기).
 export const joinByInvite = authActionClient
   .inputSchema(z.object({ token: z.string(), displayName: z.string().min(1).max(20) }))
   .action(async ({ parsedInput, ctx }) => {
@@ -24,15 +26,19 @@ export const joinByInvite = authActionClient
     // 내보내진 사람이 링크로 돌아오면 내보내기가 링크 재발급 없이는 의미가 없다(ADR-005 D4).
     if (decision === 'blocked') throw new ActionError('REMOVED_FROM_GROUP');
 
-    if (decision === 'rejoin') {
+    if (decision === 'rejoin' && existing) {
       const rejoined = await db.transaction(async (tx) => {
         await assertActiveUser(tx, ctx.userId);
-        return rejoinLeft(tx, existing!.id, parsedInput.displayName);
+        return rejoinLeft(tx, existing.id, parsedInput.displayName);
       });
       if (!rejoined) {
         // 읽은 뒤 상태가 바뀌었다 — 동시 재가입(이미 돌아옴)이거나 총무가 그 사이에 바꿨다.
-        const now = await db.query.memberships.findFirst({ where: eq(memberships.id, existing!.id) });
-        if (now?.leftReason == null) return { groupId: group.id, already: true };
+        const now = await db.query.memberships.findFirst({ where: eq(memberships.id, existing.id) });
+        if (!now) throw new ActionError('INVALID_INVITE');
+        if (now.leftReason == null) {
+          revalidatePath('/groups');
+          return { groupId: group.id, already: true };
+        }
         throw new ActionError('REMOVED_FROM_GROUP');
       }
       revalidatePath('/groups');
@@ -89,7 +95,7 @@ export const removeMember = groupActionClient
       return markRemoved(tx, ctx.groupId, parsedInput.membershipId);
     });
     if (!removed) throw new ActionError('NOT_MEMBER');
-    revalidatePath(`/groups/${ctx.groupId}/settings`);
+    revalidatePath(`/groups/${ctx.groupId}`, 'layout');
     return { removed: true };
   });
 
@@ -103,6 +109,6 @@ export const restoreMember = groupActionClient
       return restoreRemoved(tx, ctx.groupId, parsedInput.membershipId);
     });
     if (!restored) throw new ActionError('NOT_REMOVED');
-    revalidatePath(`/groups/${ctx.groupId}/settings`);
+    revalidatePath(`/groups/${ctx.groupId}`, 'layout');
     return { restored: true };
   });

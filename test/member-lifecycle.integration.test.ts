@@ -399,6 +399,27 @@ describe('나가기 · 내보내기 · 되살리기 (D2·D4)', () => {
   });
 });
 
+describe('다른 모임의 멤버십은 건드릴 수 없다', () => {
+  it('A의 총무가 B의 멤버십 id로 내보내기·되살리기를 하면 거부되고 B의 행은 그대로다', async () => {
+    const a = await seedGroup();
+    const b = await seedGroup(['철수']);
+    const [chulsoo] = b.members;
+    session.userId = a.owner.userId;
+
+    expect((await removeMember({ groupId: a.gid, membershipId: chulsoo.membershipId })).serverError).toBe(
+      'NOT_MEMBER',
+    );
+    expect((await membershipState(chulsoo)).leftReason).toBeNull();
+
+    await markLeft(chulsoo, 'removed');
+    const before = await membershipState(chulsoo);
+    expect((await restoreMember({ groupId: a.gid, membershipId: chulsoo.membershipId })).serverError).toBe(
+      'NOT_REMOVED',
+    );
+    expect(await membershipState(chulsoo)).toEqual(before);
+  });
+});
+
 describe('초대 링크로 다시 들어오기 (D4)', () => {
   it('스스로 나간 사람은 같은 멤버십으로 돌아오고 새 이름을 쓴다 — 과거 납부가 이어진다', async () => {
     const g = await seedGroup(['철수']);

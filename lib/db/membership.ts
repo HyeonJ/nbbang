@@ -16,7 +16,7 @@ export async function markLeftSelf(tx: Tx, membershipId: string): Promise<boolea
   const rows = await tx
     .update(memberships)
     .set({ leftAt: new Date(), leftReason: 'left' })
-    .where(and(eq(memberships.id, membershipId), isNull(memberships.leftAt)))
+    .where(and(eq(memberships.id, membershipId), eq(memberships.role, 'member'), isNull(memberships.leftAt)))
     .returning({ id: memberships.id });
   return rows.length > 0;
 }
