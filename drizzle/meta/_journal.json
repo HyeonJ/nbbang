@@ -57,6 +57,13 @@
       "when": 1793088749362,
       "tag": "0007_ledger_subject_membership",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793169867709,
+      "tag": "0008_member_lifecycle",
+      "breakpoints": true
     }
   ]
 }

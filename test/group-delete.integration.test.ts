@@ -6,6 +6,7 @@ import { GROUP_CHILD_DELETE_ORDER, GROUP_DELETE_TABLES } from '@/lib/db/delete';
 import { getPublicLedger } from '@/lib/db/public-queries';
 import {
   duesPayments,
+  duesRoundMembers,
   duesRounds,
   groups,
   ledgerEntries,
@@ -63,7 +64,7 @@ type Fixture = {
 };
 
 /**
- * 삭제 대상 7개 테이블 **전부**에 행이 있는 모임 하나.
+ * 삭제 대상 8개 테이블 **전부**에 행이 있는 모임 하나.
  *
  * 한 테이블이라도 비어 있으면 "그 테이블을 안 지워도 통과하는" 테스트가 된다 —
  * 아래 `seedCounts`가 그 공백을 막는다(0이 하나라도 있으면 픽스처 자체가 깨진다).
@@ -115,6 +116,7 @@ async function seedGroup(name: string): Promise<Fixture> {
   await db
     .insert(duesRounds)
     .values({ id: roundId, groupId: gid, period: '2026-02', amountPerPerson: 20_000 });
+  await db.insert(duesRoundMembers).values({ groupId: gid, roundId, membershipId: owner.membershipId });
   await db.insert(duesPayments).values({
     id: crypto.randomUUID(),
     groupId: gid,
@@ -443,7 +445,7 @@ describe('파괴 목록 대조 (FK 메타데이터)', () => {
     const inScope = edges.filter(
       (e) => e.child !== e.parent && order.has(e.child) && order.has(e.parent),
     );
-    // 폐포에 7개 자식 테이블이 있으므로 검사할 간선이 없을 리 없다 — 0건이면 쿼리가 틀린 것이다.
+    // 폐포에 8개 자식 테이블이 있으므로 검사할 간선이 없을 리 없다 — 0건이면 쿼리가 틀린 것이다.
     expect(inScope.length, 'FK 간선을 하나도 못 찾았다 — 대조가 헛돌고 있다').toBeGreaterThan(0);
 
     const violations = inScope.filter((e) => order.get(e.child)! > order.get(e.parent)!);

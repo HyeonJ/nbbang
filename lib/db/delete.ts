@@ -3,6 +3,7 @@ import { getTableConfig, type PgColumn, type PgTable } from 'drizzle-orm/pg-core
 import type { db } from '.';
 import {
   duesPayments,
+  duesRoundMembers,
   duesRounds,
   groups,
   ledgerEntries,
@@ -33,7 +34,8 @@ import {
  * ── 순서의 근거 ──────────────────────────────────────────────────────────────
  * 자식 → 부모. 같은 이유로 `ledger_entries`는 `dues_payments` 뒤,
  * `memberships`는 정산 3종과 `dues_payments` 뒤에 온다.
- *  - `dues_payments` → dues_rounds · memberships · ledger_entries (복합 FK 3개)
+ *  - `dues_payments` → dues_rounds · memberships · ledger_entries (복합 FK 3개) · dues_round_members (명단 FK)
+ *  - `dues_round_members` → dues_rounds · memberships (복합 FK 2개). `dues_payments`가 이것을 가리킨다
  *  - `settlement_transfers` → settlements · memberships (from·to 양쪽)
  *  - `settlement_participants` → settlements · memberships
  *  - `settlements` → memberships (선결제자)
@@ -60,6 +62,7 @@ type GroupScopedTable = PgTable & { groupId: PgColumn };
  */
 export const GROUP_CHILD_DELETE_ORDER: readonly GroupScopedTable[] = [
   duesPayments,
+  duesRoundMembers,
   settlementTransfers,
   settlementParticipants,
   settlements,

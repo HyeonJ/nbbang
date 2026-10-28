@@ -1,9 +1,12 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   foreignKey,
   index,
   integer,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -72,12 +75,21 @@ export const memberships = pgTable('memberships', {
   role: text('role', { enum: ['owner', 'member'] }).notNull(),
   displayName: text('display_name').notNull(),
   joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * 모임을 떠난 시각. **null = 활동 중** — 접근·목록·명단 스냅샷의 판정은 이 한 컬럼으로만 한다(ADR-005).
+   * 행을 지우지 않는 이유는 탈퇴와 같다: 원장·납부·정산·과거 회차 명단이 이 행을 참조한다.
+   */
+  leftAt: timestamp('left_at', { withTimezone: true }),
+  /** 'left' 본인 · 'removed' 총무가 내보냄 · 'withdrawn' 회원 탈퇴. 되살리기·재가입 판정이 이것을 본다. */
+  leftReason: text('left_reason', { enum: ['left', 'removed', 'withdrawn'] }),
 }, (t) => [
   uniqueIndex('memberships_user_group').on(t.userId, t.groupId),
   // id는 이미 PK라 이 유니크는 행을 더 좁히지 않는다 — 존재 이유는 **복합 FK의 참조 대상**이다.
   // Postgres는 FK가 가리키는 컬럼 조합에 유니크 제약을 요구하므로, 이것이 없으면
   // dues_payments가 (group_id, membership_id)로 "같은 모임의 그 멤버십"을 가리킬 수 없다.
   unique('memberships_group_id_key').on(t.groupId, t.id),
+  // 둘 중 하나만 채워진 행은 "떠났는데 이유가 없다" 또는 그 반대 — 판정이 갈린다.
+  check('memberships_left_consistency', sql`(${t.leftAt} is null) = (${t.leftReason} is null)`),
 ]);
 
 export const ledgerEntries = pgTable('ledger_entries', {
@@ -175,6 +187,31 @@ export const duesRounds = pgTable('dues_rounds', {
 ]);
 
 /**
+ * 회차 명단 — 회차를 만들 때 활동 중이던 멤버로 **고정**된다(ADR-005 D1).
+ * 이후 합류한 사람은 이 회차에 없고, 나간 사람은 남는다(그 시점의 의무). 총무가 빼거나(면제) 넣을 수 있다.
+ * 납부(`dues_payments`)가 이 행을 복합 FK로 가리키므로, 명단 밖 납부와 납부자 명단 삭제를 DB가 막는다.
+ */
+export const duesRoundMembers = pgTable('dues_round_members', {
+  groupId: text('group_id').notNull().references(() => groups.id),
+  roundId: text('round_id').notNull(),
+  membershipId: text('membership_id').notNull(),
+}, (t) => [
+  primaryKey({ name: 'dues_round_members_pk', columns: [t.roundId, t.membershipId] }),
+  // dues_payments_roster_fk의 참조 대상(memberships_group_id_key와 같은 이유).
+  unique('dues_round_members_group_round_membership_key').on(t.groupId, t.roundId, t.membershipId),
+  foreignKey({
+    columns: [t.groupId, t.roundId],
+    foreignColumns: [duesRounds.groupId, duesRounds.id],
+    name: 'dues_round_members_round_fk',
+  }),
+  foreignKey({
+    columns: [t.groupId, t.membershipId],
+    foreignColumns: [memberships.groupId, memberships.id],
+    name: 'dues_round_members_membership_fk',
+  }),
+]);
+
+/**
  * ⚠️ `groupId`는 "두 번째 진실 원천"이 아니다 — **복합 FK의 구성요소**다.
  * 단독 컬럼만 추가하면 round의 모임과 어긋날 수 있어 오히려 해롭고, 아래 세 복합 FK와
  * 함께여야 의미가 있다: 회차·멤버십·원장 엔트리가 **모두 이 결제와 같은 모임**임을 DB가 보장한다.
@@ -207,6 +244,13 @@ export const duesPayments = pgTable('dues_payments', {
     columns: [t.groupId, t.ledgerEntryId],
     foreignColumns: [ledgerEntries.groupId, ledgerEntries.id],
     name: 'dues_payments_entry_fk',
+  }),
+  // 납부는 명단 안에서만 존재한다 — 명단 밖 insert와 납부자 명단 delete가 모두 23503이다.
+  // 그래서 회차 화면의 "납부 > 명단" 상태는 표현 불가능하다.
+  foreignKey({
+    columns: [t.groupId, t.roundId, t.membershipId],
+    foreignColumns: [duesRoundMembers.groupId, duesRoundMembers.roundId, duesRoundMembers.membershipId],
+    name: 'dues_payments_roster_fk',
   }),
 ]);
 
