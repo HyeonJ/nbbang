@@ -131,8 +131,8 @@ async function writeCounts() {
       (select string_agg(id || ':' || coalesce(left_reason, '-'), ',' order by id)
          from memberships where group_id in (${fx.gidA}, ${fx.gidB})) as "memberStates",
       -- 재발급 액션의 쓰기는 **행을 늘리지 않는다** — groups의 두 컬럼을 덮어쓴다. 계수만 보면
-      -- 그 유출이 전부 보이지 않으므로 토큰 값 자체를 상태에 넣는다. 부수 효과로 다른 다섯
-      -- 액션의 거부도 "토큰을 건드리지 않았다"까지 함께 단언하게 된다.
+      -- 그 유출이 전부 보이지 않으므로 토큰 값 자체를 상태에 넣는다. 부수 효과로 재발급 외의
+      -- 열한 액션(나가기 포함)의 거부도 "토큰을 건드리지 않았다"까지 함께 단언하게 된다.
       (select string_agg(invite_token || '|' || public_token, ',' order by id)
          from groups where id in (${fx.gidA}, ${fx.gidB})) as tokens`;
   return row as {
@@ -515,12 +515,15 @@ test.describe('인가 매트릭스', () => {
       // 명단 편집 2종 — 거부가 새면 roster 계수가 움직인다.
       ['addToRound', { groupId: fx.gidA, roundId: fx.roundIdA, membershipId: fx.memberMembershipA }],
       ['removeFromRound', { groupId: fx.gidA, roundId: fx.roundIdA, membershipId: fx.ownerMembershipA }],
-      // 멤버십 상태 2종 — 거부가 새면 memberStates가 움직인다.
+      // 멤버십 상태 2종. removeMember는 거부가 새면 memberStates가 움직인다.
+      // restoreMember의 대상은 스스로 나간 멤버십이라 거부가 새도 NOT_REMOVED로 아무것도 쓰지
+      // 않는다 — 이 줄에서 누출을 잡는 것은 계수가 아니라 **기대 코드와의 불일치**다.
       ['removeMember', { groupId: fx.gidA, membershipId: fx.memberMembershipA }],
       ['restoreMember', { groupId: fx.gidA, membershipId: fx.leftMembershipA }],
       // 삭제 — **이름까지 맞는** 입력이다. 거부가 인가에서 나야 하므로 NAME_MISMATCH로 비껴가면
-      // 안 된다. 즉 이 네 역할에 대해서는 "이름을 알아도 못 지운다"를 확인하는 것이다.
-      // 거부가 새면 writeCounts의 세 계수가 전부 0이 되고 tokens가 A를 잃는다 — 가장 크게 보이는 유출.
+      // 안 된다. 즉 이 다섯 역할에 대해서는 "이름을 알아도 못 지운다"를 확인하는 것이다.
+      // 거부가 새면 writeCounts의 네 계수(entries·payments·rounds·roster)가 전부 0이 되고
+      // memberStates·tokens가 A를 잃는다 — 가장 크게 보이는 유출.
       ['deleteGroup', { groupId: fx.gidA, name: '인가모임' }],
     ] as const satisfies readonly (readonly [ActionName, unknown])[];
 
@@ -575,6 +578,8 @@ test.describe('인가 매트릭스', () => {
     for (const [action, input] of validInputs()) {
       await expectDenied(leftCtx, action, input, 'NOT_MEMBER', baseline);
     }
+    // 나간 멤버의 나가기는 가드와 markLeftSelf 양쪽이 NOT_MEMBER를 낸다 —
+    // 이 줄은 코드를 고정할 뿐 가드를 증명하지 않는다(가드는 위 반복의 12종이 증명한다).
     await expectDenied(leftCtx, 'leaveGroup', { groupId: fx.gidA }, 'NOT_MEMBER', baseline);
 
     const page = await leftCtx.newPage();
@@ -601,7 +606,7 @@ test.describe('인가 매트릭스', () => {
    * `app/api/groups/[groupId]/export/route.ts`에 손으로 쓴 네 줄이 전부다 —
    * 이 레포에서 인가 코드가 중복된 유일한 자리이고, 그래서 회귀 위험도 여기에만 있다.
    *
-   * 역할 다섯 개가 이미 갖춰진 이 스펙이 그 확인의 제자리다. 읽기 경로라 쓰기 계수는 보지
+   * 역할 여섯 개(총무·멤버·비멤버·미인증·공개 방문자·나간 멤버)가 이미 갖춰진 이 스펙이 그 확인의 제자리다. 읽기 경로라 쓰기 계수는 보지
    * 않지만, 묻는 것은 같다: **누가 이 모임의 데이터에 닿는가.**
    */
   test('CSV 내보내기는 멤버 이상만 통과한다 — 액션 미들웨어를 지나지 않는 경로', async () => {
@@ -703,7 +708,11 @@ test.describe('인가 매트릭스', () => {
       'NOT_MEMBER',
       baseline,
     );
-    // 멤버십 상태 — 비교-후-갱신의 WHERE에 group_id가 있다.
+    // 멤버십 상태 — 남의 모임 id에 대한 **도메인 코드**를 고정한다. 이 두 줄은 WHERE의 group_id를
+    // 증명하지 못한다: B의 멤버십은 총무 것뿐이라 role='member'·left_reason='removed' 조건에서 이미
+    // 떨어진다. group_id 술어 자체는 통합 테스트 '다른 모임의 멤버십은 건드릴 수 없다'
+    // (test/member-lifecycle.integration.test.ts, 변이 확인 포함)가 증명한다 — 여기서 B에 평범한
+    // 멤버를 세우려면 UI 준비가 더 필요하다.
     await expectDenied(
       ownerCtx,
       'removeMember',
@@ -822,7 +831,7 @@ test.describe('인가 매트릭스', () => {
    *
    * ⚠️ **뒤에서 두 번째 테스트여야 한다.** 여기서 공개 토큰을 실제로 돌리므로 그 뒤의 테스트가
    * `publicUrl`을 쓰면 404를 만난다(describe가 serial이므로 순서는 선언 순서다).
-   * 여덟 번째 액션(`deleteGroup`)의 대조군만 이 뒤에 온다 — 그것은 모임 A를 없애기 때문이다.
+   * `deleteGroup`의 대조군만 이 뒤에 온다 — 그것은 모임 A를 없애기 때문이다.
    */
   test('같은 재생 경로로 총무는 비파괴 11종 전부 성공한다 (대조군)', async () => {
     const before = await writeCounts();
@@ -902,9 +911,9 @@ test.describe('인가 매트릭스', () => {
   });
 
   /**
-   * 여덟 번째 액션의 성공 대조군 — **파괴적이라 맨 마지막이다**.
+   * `deleteGroup`의 성공 대조군 — **파괴적이라 맨 마지막이다**.
    *
-   * 앞의 네 역할은 "이름까지 맞는 입력으로도 못 지운다"를 확인했다. 그 거부들이 인가에서 난
+   * 앞의 다섯 역할은 "이름까지 맞는 입력으로도 못 지운다"를 확인했다. 그 거부들이 인가에서 난
    * 것임을 보이려면 같은 재생 경로·같은 id로 총무가 **실제로 지워지는** 것을 보여야 한다.
    * 지워진 A는 돌아오지 않으므로 이 뒤에는 어떤 테스트도 올 수 없다.
    *

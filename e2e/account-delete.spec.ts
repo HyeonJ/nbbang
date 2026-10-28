@@ -184,7 +184,7 @@ test.describe('회원 탈퇴', () => {
     const left = page.getByTestId('left-member-row');
     await expect(left, '탈퇴자가 나간 멤버에 없다').toHaveCount(1);
     await expect(left).toContainText('탈퇴한 멤버');
-    await expect(left).toContainText('탈퇴');
+    await expect(left).toContainText('· 탈퇴');
     // 이름이 파기된 멤버십은 되살릴 수 없다 — 버튼 자체가 없다.
     await expect(left.getByTestId('restore-member')).toHaveCount(0);
     await expect(left, '나간 멤버 행에 원래 이름이 남았다').not.toContainText('민지');
