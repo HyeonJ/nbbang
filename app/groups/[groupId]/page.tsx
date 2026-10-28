@@ -6,6 +6,7 @@ import { Amount } from '@/components/ui/amount';
 import { Cell, DataTable, Row } from '@/components/ui/data-table';
 import { GroupTabs } from '@/components/ui/group-tabs';
 import { PageHeader, RoleBadge } from '@/components/ui/page-header';
+import LeaveGroupPanel from './leave-group-panel';
 
 export default async function GroupDashboardPage({ params }: { params: Promise<{ groupId: string }> }) {
   const { groupId } = await params;
@@ -100,6 +101,15 @@ export default async function GroupDashboardPage({ params }: { params: Promise<{
           </DataTable>
         </div>
       </section>
+      {/* 멤버 전용. 총무는 떠날 수 없다(위임은 P1) — 설정의 위험 구역이 총무의 자리다. */}
+      {membership.role !== 'owner' ? (
+        <section className="pt-14">
+          <h2 className="font-display text-[12px] font-bold tracking-[0.14em] text-ink uppercase">모임 나가기</h2>
+          <div className="mt-4 border-t-2 border-ink pt-5">
+            <LeaveGroupPanel groupId={groupId} groupName={group.name} />
+          </div>
+        </section>
+      ) : null}
     </main>
   );
 }
