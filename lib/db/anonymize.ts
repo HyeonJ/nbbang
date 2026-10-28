@@ -1,5 +1,6 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { db } from '.';
+import { ANONYMOUS_MEMBER_NAME } from '@/lib/domain/member';
 import {
   account,
   ledgerEntries,
@@ -59,7 +60,7 @@ import {
 export const ANONYMOUS_USER_NAME = '탈퇴한 사용자';
 
 /** 탈퇴 후 멤버십·정산 참여자 스냅샷의 표시 이름. 남은 멤버들이 화면에서 보는 문자열이다. */
-export const ANONYMOUS_MEMBER_NAME = '탈퇴한 멤버';
+export { ANONYMOUS_MEMBER_NAME } from '@/lib/domain/member';
 
 /**
  * 파기 후 들어가는 이메일. `@deleted.invalid`는 RFC 2606의 예약 TLD라 **실재할 수 없다.**
