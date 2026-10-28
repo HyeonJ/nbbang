@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation';
 import { getActiveSession } from '@/lib/session';
-import { getGroupForMember, getGroupMembers } from '@/lib/db/queries';
+import { getGroupForMember, getGroupMembers, getLeftMembers } from '@/lib/db/queries';
 import { formatDateKst } from '@/lib/format';
 import { Cell, DataTable, Row } from '@/components/ui/data-table';
 import { GroupTabs } from '@/components/ui/group-tabs';
@@ -8,7 +8,14 @@ import { PageHeader, RoleBadge } from '@/components/ui/page-header';
 import AccountPanel from './account-panel';
 import DeleteGroupPanel from './delete-group-panel';
 import InviteLinkPanel from './invite-link-panel';
+import { RemoveMemberButton, RestoreMemberButton } from './member-actions';
 import PublicLinkPanel from './public-link-panel';
+
+const LEFT_REASON_LABEL: Record<'left' | 'removed' | 'withdrawn', string> = {
+  left: '스스로 나감',
+  removed: '내보냄',
+  withdrawn: '탈퇴',
+};
 
 export default async function GroupSettingsPage({ params }: { params: Promise<{ groupId: string }> }) {
   const { groupId } = await params;
@@ -24,7 +31,7 @@ export default async function GroupSettingsPage({ params }: { params: Promise<{ 
   if (found.membership.role !== 'owner') notFound();
 
   const { group } = found;
-  const members = await getGroupMembers(groupId);
+  const [members, leftMembers] = await Promise.all([getGroupMembers(groupId), getLeftMembers(groupId)]);
 
   return (
     <main className="mx-auto max-w-3xl px-5 pb-20">
@@ -44,13 +51,47 @@ export default async function GroupSettingsPage({ params }: { params: Promise<{ 
                   {m.role === 'owner' ? <span className="text-[12px] text-muted"> · 총무</span> : null}
                 </Cell>
                 <Cell align="right">
-                  <span className="num text-[13px] font-medium text-muted">{formatDateKst(m.joinedAt)}</span>
+                  <span className="inline-flex items-start gap-3">
+                    <span className="num text-[13px] font-medium text-muted">{formatDateKst(m.joinedAt)}</span>
+                    {m.role !== 'owner' ? (
+                      <RemoveMemberButton groupId={groupId} membershipId={m.id} displayName={m.displayName} />
+                    ) : null}
+                  </span>
                 </Cell>
               </Row>
             ))}
           </DataTable>
         </div>
       </section>
+
+      {leftMembers.length > 0 ? (
+        <section className="pt-10">
+          <h2 className="font-display text-[12px] font-bold tracking-[0.14em] text-ink uppercase">
+            나간 멤버 {leftMembers.length}명
+          </h2>
+          <div className="mt-4">
+            <DataTable>
+              {leftMembers.map((m) => (
+                <Row key={m.id} testId="left-member-row">
+                  <Cell>
+                    <span className="font-bold">{m.displayName}</span>
+                    <span className="text-[12px] text-muted"> · {LEFT_REASON_LABEL[m.leftReason!]}</span>
+                  </Cell>
+                  <Cell align="right">
+                    <span className="inline-flex items-start gap-3">
+                      <span className="num text-[13px] font-medium text-muted">{formatDateKst(m.leftAt!)}</span>
+                      {/* 스스로 나간 사람은 초대 링크로 돌아온다. 탈퇴자는 이름이 파기돼 되살릴 대상이 아니다. */}
+                      {m.leftReason === 'removed' ? (
+                        <RestoreMemberButton groupId={groupId} membershipId={m.id} displayName={m.displayName} />
+                      ) : null}
+                    </span>
+                  </Cell>
+                </Row>
+              ))}
+            </DataTable>
+          </div>
+        </section>
+      ) : null}
 
       <section className="pt-10">
         <h2 className="font-display text-[12px] font-bold tracking-[0.14em] text-ink uppercase">입금 계좌</h2>
