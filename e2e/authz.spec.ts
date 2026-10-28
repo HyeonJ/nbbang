@@ -33,7 +33,7 @@ import { createGroup, INVITE_JOIN_URL, newClientContext, signUp, testEmail } fro
 const ORIGIN = 'http://localhost:3000';
 
 /**
- * 쓰기 액션 8종. 값은 포획한 Next-Action id.
+ * 쓰기 액션 13종 — 매트릭스 12종과, 멤버에게는 허용된 쓰기라 따로 보는 `leaveGroup`. 값은 포획한 Next-Action id.
  *
  * `regenerate*` 둘은 원래 이 매트릭스에 없었다 — 포획하려면 총무가 실제로 재발급을 해야
  * 하고, 그러면 **네 번째 역할이 읽는 공개 링크가 그 자리에서 죽는다**. 순서로 풀었다:
@@ -55,7 +55,12 @@ type ActionName =
   | 'unmarkPaid'
   | 'regenerateInviteToken'
   | 'regeneratePublicToken'
-  | 'deleteGroup';
+  | 'deleteGroup'
+  | 'addToRound'
+  | 'removeFromRound'
+  | 'removeMember'
+  | 'restoreMember'
+  | 'leaveGroup';
 const ids = {} as Record<ActionName, string>;
 
 /** 재생에 쓸 소재 — 모임 A(총무·멤버)와 남의 모임 B. */
@@ -76,6 +81,8 @@ const fx = {
   ownerMembershipA: '',
   memberMembershipA: '',
   membershipB: '',
+  /** 합류했다가 스스로 나간 A의 멤버십 — "나간 멤버" 컨텍스트의 주인. */
+  leftMembershipA: '',
 };
 
 let ownerCtx: BrowserContext;
@@ -89,11 +96,17 @@ let anonCtx: BrowserContext;
  * "읽을 권한이 있는 미인증 방문자"라는 **새로운 종류의 주체**가 나타났고, 그 사람이 읽기에서
  * 쓰기로 넘어갈 수 있는지는 기존 세 역할 중 어느 것도 답하지 않는다.
  * 공개 토큰은 **읽기 전용 베어러**여야 한다 — 쿠키가 아니므로 세션이 되지 않고,
- * 따라서 쓰기 액션 8종은 전부 `UNAUTHENTICATED`로 떨어져야 한다.
+ * 따라서 쓰기 액션 12종은 전부 `UNAUTHENTICATED`로 떨어져야 한다.
  */
 let publicVisitorCtx: BrowserContext;
 /** 그 방문자가 실제로 장부를 **읽을 수 있는** 링크 — 읽기 권한이 있다는 전제가 참이어야 한다. */
 let publicUrl = '';
+/**
+ * 다섯 번째 역할: **나간 멤버**(Plan 05). 세션은 살아 있고 멤버십 행도 남아 있지만
+ * 활동 중이 아니다. 행이 남아 있으므로 "멤버십 존재"로 판정하는 코드는 이 사람을 멤버로
+ * 통과시킨다 — 그래서 별도 역할이다. 모든 액션이 NOT_MEMBER여야 한다.
+ */
+let leftCtx: BrowserContext;
 
 // DATABASE_URL은 playwright.config.ts가 .env.test에서 로드했거나 CI가 주입한 값 —
 // global-setup이 이미 센티널·dev DB 가드를 통과시킨 그 DB다. 여기서는 **읽기만** 한다.
@@ -113,6 +126,10 @@ async function writeCounts() {
       (select count(*)::int from ledger_entries where group_id in (${fx.gidA}, ${fx.gidB})) as entries,
       (select count(*)::int from dues_payments  where group_id in (${fx.gidA}, ${fx.gidB})) as payments,
       (select count(*)::int from dues_rounds    where group_id in (${fx.gidA}, ${fx.gidB})) as rounds,
+      (select count(*)::int from dues_round_members where group_id in (${fx.gidA}, ${fx.gidB})) as roster,
+      -- 내보내기·되살리기·나가기는 행을 늘리지 않고 상태를 바꾼다(재발급의 토큰과 같은 이유).
+      (select string_agg(id || ':' || coalesce(left_reason, '-'), ',' order by id)
+         from memberships where group_id in (${fx.gidA}, ${fx.gidB})) as "memberStates",
       -- 재발급 액션의 쓰기는 **행을 늘리지 않는다** — groups의 두 컬럼을 덮어쓴다. 계수만 보면
       -- 그 유출이 전부 보이지 않으므로 토큰 값 자체를 상태에 넣는다. 부수 효과로 다른 다섯
       -- 액션의 거부도 "토큰을 건드리지 않았다"까지 함께 단언하게 된다.
@@ -122,6 +139,8 @@ async function writeCounts() {
     entries: number;
     payments: number;
     rounds: number;
+    roster: number;
+    memberStates: string;
     tokens: string;
   };
 }
@@ -321,6 +340,44 @@ test.describe('인가 매트릭스', () => {
     await mp.getByTestId('join-submit').click();
     await expect(mp).toHaveURL(/\/groups\/[^/]+$/);
 
+    // ── 나간 멤버: 합류 → 총무가 명단 편집·내보내기·되살리기로 id 포획 → 본인이 나감 ──────
+    // 이 사람이 포획의 대상이자 다섯 번째 역할이다. 마지막에 스스로 나가면서 leaveGroup id를 준다.
+    leftCtx = await newClientContext(browser);
+    const lp = await leftCtx.newPage();
+    lp.on('dialog', (d) => d.accept());
+    await lp.goto(invite);
+    await lp.getByTestId('join-login-link').click();
+    await signUp(lp, { name: '탈주', email: testEmail('authz', 'leaver') });
+    await expect(lp).toHaveURL(INVITE_JOIN_URL);
+    await lp.getByTestId('join-display-name').fill('탈주');
+    await lp.getByTestId('join-submit').click();
+    await expect(lp).toHaveURL(/\/groups\/[^/]+$/);
+
+    // 회차 A는 총무 혼자일 때 만들었으므로 탈주·철수 모두 '명단에 없는 멤버'다.
+    await op.goto(`/groups/${fx.gidA}/dues/${fx.roundIdA}`);
+    ids.addToRound = await captureActionId(op, () =>
+      op.getByRole('button', { name: '탈주 명단에 추가' }).click(),
+    );
+    await expect(op.getByRole('button', { name: '탈주 면제' })).toBeVisible();
+    ids.removeFromRound = await captureActionId(op, () =>
+      op.getByRole('button', { name: '탈주 면제' }).click(),
+    );
+    await expect(op.getByRole('button', { name: '탈주 명단에 추가' })).toBeVisible();
+
+    await op.goto(`/groups/${fx.gidA}/settings`);
+    ids.removeMember = await captureActionId(op, () =>
+      op.getByRole('button', { name: '탈주 내보내기' }).click(),
+    );
+    await expect(op.getByTestId('left-member-row')).toHaveCount(1);
+    ids.restoreMember = await captureActionId(op, () =>
+      op.getByRole('button', { name: '탈주 되살리기' }).click(),
+    );
+    await expect(op.getByTestId('left-member-row')).toHaveCount(0);
+
+    await lp.goto(`/groups/${fx.gidA}`);
+    ids.leaveGroup = await captureActionId(lp, () => lp.getByTestId('leave-group').click());
+    await expect(lp).toHaveURL(/\/groups$/);
+
     // ── 비멤버: 자기 모임 B의 총무. B의 소재는 액션 재생으로 만든다 ───────────
     // 영희는 B의 총무이므로 이것은 정당한 경로다 — UI 단계를 되풀이하지 않고 소재만 얻는다.
     outsiderCtx = await newClientContext(browser);
@@ -409,13 +466,16 @@ test.describe('인가 매트릭스', () => {
     fx.reversalEntryA = entries.find((e) => e.reversal_of === fx.reversedEntryA)!.id;
     fx.entryB = entries.find((e) => e.group_id === fx.gidB && e.type === 'EXPENSE')!.id;
 
-    const mems = (await sql`select id, group_id, role from memberships`) as {
+    const mems = (await sql`select id, group_id, role, display_name, left_reason from memberships`) as {
       id: string;
       group_id: string;
       role: string;
+      display_name: string;
+      left_reason: string | null;
     }[];
     fx.ownerMembershipA = mems.find((m) => m.group_id === fx.gidA && m.role === 'owner')!.id;
-    fx.memberMembershipA = mems.find((m) => m.group_id === fx.gidA && m.role === 'member')!.id;
+    fx.memberMembershipA = mems.find((m) => m.group_id === fx.gidA && m.display_name === '철수')!.id;
+    fx.leftMembershipA = mems.find((m) => m.group_id === fx.gidA && m.left_reason === 'left')!.id;
     fx.membershipB = mems.find((m) => m.group_id === fx.gidB)!.id;
 
     for (const [k, v] of Object.entries({ ...ids, ...fx })) {
@@ -430,6 +490,7 @@ test.describe('인가 매트릭스', () => {
       outsiderCtx?.close(),
       anonCtx?.close(),
       publicVisitorCtx?.close(),
+      leftCtx?.close(),
     ]);
   });
 
@@ -451,27 +512,33 @@ test.describe('인가 매트릭스', () => {
       // 바뀌는 쓰기), 그래서 writeCounts가 토큰 값까지 들고 있다.
       ['regenerateInviteToken', { groupId: fx.gidA }],
       ['regeneratePublicToken', { groupId: fx.gidA }],
+      // 명단 편집 2종 — 거부가 새면 roster 계수가 움직인다.
+      ['addToRound', { groupId: fx.gidA, roundId: fx.roundIdA, membershipId: fx.memberMembershipA }],
+      ['removeFromRound', { groupId: fx.gidA, roundId: fx.roundIdA, membershipId: fx.ownerMembershipA }],
+      // 멤버십 상태 2종 — 거부가 새면 memberStates가 움직인다.
+      ['removeMember', { groupId: fx.gidA, membershipId: fx.memberMembershipA }],
+      ['restoreMember', { groupId: fx.gidA, membershipId: fx.leftMembershipA }],
       // 삭제 — **이름까지 맞는** 입력이다. 거부가 인가에서 나야 하므로 NAME_MISMATCH로 비껴가면
       // 안 된다. 즉 이 네 역할에 대해서는 "이름을 알아도 못 지운다"를 확인하는 것이다.
       // 거부가 새면 writeCounts의 세 계수가 전부 0이 되고 tokens가 A를 잃는다 — 가장 크게 보이는 유출.
       ['deleteGroup', { groupId: fx.gidA, name: '인가모임' }],
     ] as const satisfies readonly (readonly [ActionName, unknown])[];
 
-  test('멤버(총무 아님)는 쓰기 액션 8종 전부 FORBIDDEN이고 아무것도 쓰이지 않는다', async () => {
+  test('멤버(총무 아님)는 쓰기 액션 12종 전부 FORBIDDEN이고 아무것도 쓰이지 않는다', async () => {
     const baseline = await writeCounts();
     for (const [action, input] of validInputs()) {
       await expectDenied(memberCtx, action, input, 'FORBIDDEN', baseline);
     }
   });
 
-  test('비멤버는 쓰기 액션 8종 전부 NOT_MEMBER다 — 모임의 존재 여부도 알려주지 않는다', async () => {
+  test('비멤버는 쓰기 액션 12종 전부 NOT_MEMBER다 — 모임의 존재 여부도 알려주지 않는다', async () => {
     const baseline = await writeCounts();
     for (const [action, input] of validInputs()) {
       await expectDenied(outsiderCtx, action, input, 'NOT_MEMBER', baseline);
     }
   });
 
-  test('미인증은 쓰기 액션 8종 전부 UNAUTHENTICATED다', async () => {
+  test('미인증은 쓰기 액션 12종 전부 UNAUTHENTICATED다', async () => {
     const baseline = await writeCounts();
     for (const [action, input] of validInputs()) {
       await expectDenied(anonCtx, action, input, 'UNAUTHENTICATED', baseline);
@@ -483,10 +550,10 @@ test.describe('인가 매트릭스', () => {
    *
    * 이 테스트는 두 주장을 한 번에 한다:
    *  1. 이 컨텍스트는 정말로 장부를 **읽을 수 있다**(그래서 이 역할이 실재한다),
-   *  2. 그런데도 쓰기 액션 8종은 전부 UNAUTHENTICATED다 — 토큰이 세션이 되지 않는다.
+   *  2. 그런데도 쓰기 액션 12종은 전부 UNAUTHENTICATED다 — 토큰이 세션이 되지 않는다.
    * 1번이 없으면 "그냥 아무 권한도 없는 컨텍스트"를 시험하는 것이라 anonCtx와 구별되지 않는다.
    */
-  test('공개 장부 링크 보유자는 읽을 수 있어도 쓰기 8종은 전부 UNAUTHENTICATED다', async () => {
+  test('공개 장부 링크 보유자는 읽을 수 있어도 쓰기 12종은 전부 UNAUTHENTICATED다', async () => {
     const page = await publicVisitorCtx.newPage();
     expect(await publicVisitorCtx.cookies(), '공개 방문자에게 쿠키가 있다').toEqual([]);
     await page.goto(publicUrl);
@@ -501,6 +568,28 @@ test.describe('인가 매트릭스', () => {
     for (const [action, input] of validInputs()) {
       await expectDenied(publicVisitorCtx, action, input, 'UNAUTHENTICATED', baseline);
     }
+  });
+
+  test('나간 멤버는 쓰기 12종과 나가기 모두 NOT_MEMBER이고, 모임 화면·CSV는 404다', async () => {
+    const baseline = await writeCounts();
+    for (const [action, input] of validInputs()) {
+      await expectDenied(leftCtx, action, input, 'NOT_MEMBER', baseline);
+    }
+    await expectDenied(leftCtx, 'leaveGroup', { groupId: fx.gidA }, 'NOT_MEMBER', baseline);
+
+    const page = await leftCtx.newPage();
+    expect((await page.goto(`/groups/${fx.gidA}`))?.status(), '나간 멤버에게 모임 화면이 열린다').toBe(404);
+    await page.close();
+    expect((await leftCtx.request.get(`${ORIGIN}/api/groups/${fx.gidA}/export`)).status()).toBe(404);
+  });
+
+  test('나가기는 본인 소속에만 — 비멤버 NOT_MEMBER, 미인증·공개 UNAUTHENTICATED, 총무 OWNER_CANNOT_LEAVE', async () => {
+    const baseline = await writeCounts();
+    const input = { groupId: fx.gidA };
+    await expectDenied(outsiderCtx, 'leaveGroup', input, 'NOT_MEMBER', baseline);
+    await expectDenied(anonCtx, 'leaveGroup', input, 'UNAUTHENTICATED', baseline);
+    await expectDenied(publicVisitorCtx, 'leaveGroup', input, 'UNAUTHENTICATED', baseline);
+    await expectDenied(ownerCtx, 'leaveGroup', input, 'OWNER_CANNOT_LEAVE', baseline);
   });
 
   /**
@@ -597,6 +686,36 @@ test.describe('인가 매트릭스', () => {
       'unmarkPaid',
       { groupId: fx.gidA, roundId: fx.roundIdA, membershipId: fx.memberMembershipA },
       'PAYMENT_NOT_FOUND',
+      baseline,
+    );
+    // 명단 편집 — 남의 회차는 getRound에서, 남의 멤버십은 활동 중 조회에서 떨어진다.
+    await expectDenied(
+      ownerCtx,
+      'addToRound',
+      { groupId: fx.gidA, roundId: fx.roundIdB, membershipId: fx.memberMembershipA },
+      'ROUND_NOT_FOUND',
+      baseline,
+    );
+    await expectDenied(
+      ownerCtx,
+      'addToRound',
+      { groupId: fx.gidA, roundId: fx.roundIdA, membershipId: fx.membershipB },
+      'NOT_MEMBER',
+      baseline,
+    );
+    // 멤버십 상태 — 비교-후-갱신의 WHERE에 group_id가 있다.
+    await expectDenied(
+      ownerCtx,
+      'removeMember',
+      { groupId: fx.gidA, membershipId: fx.membershipB },
+      'NOT_MEMBER',
+      baseline,
+    );
+    await expectDenied(
+      ownerCtx,
+      'restoreMember',
+      { groupId: fx.gidA, membershipId: fx.membershipB },
+      'NOT_REMOVED',
       baseline,
     );
   });
@@ -698,14 +817,14 @@ test.describe('인가 매트릭스', () => {
 
   /**
    * 대조군 — 위 거부들이 "재생이 액션에 도달하지 못해서" 난 것이 아님을 보인다.
-   * 같은 재생 경로·같은 id로 총무 세션이 일곱 액션 모두 성공시키고 원장·토큰이 실제로 변한다.
+   * 같은 재생 경로·같은 id로 총무 세션이 열한 액션 모두 성공시키고 원장·토큰이 실제로 변한다.
    * 이 테스트가 없으면 포획한 id가 엉뚱해도 매트릭스 전체가 초록일 수 있다.
    *
    * ⚠️ **뒤에서 두 번째 테스트여야 한다.** 여기서 공개 토큰을 실제로 돌리므로 그 뒤의 테스트가
    * `publicUrl`을 쓰면 404를 만난다(describe가 serial이므로 순서는 선언 순서다).
    * 여덟 번째 액션(`deleteGroup`)의 대조군만 이 뒤에 온다 — 그것은 모임 A를 없애기 때문이다.
    */
-  test('같은 재생 경로로 총무는 비파괴 7종 전부 성공한다 (대조군)', async () => {
+  test('같은 재생 경로로 총무는 비파괴 11종 전부 성공한다 (대조군)', async () => {
     const before = await writeCounts();
 
     await expectAllowed(ownerCtx, 'createExpense', {
@@ -730,6 +849,20 @@ test.describe('인가 매트릭스', () => {
       roundId,
       membershipId: fx.ownerMembershipA,
     });
+    // 명단 편집 2종 — 넣고 다시 빼서 순증 0. 새 회차는 철수가 활동 중일 때 만들어져 이미 명단에 있다.
+    await expectAllowed(ownerCtx, 'removeFromRound', {
+      groupId: fx.gidA,
+      roundId,
+      membershipId: fx.memberMembershipA,
+    });
+    await expectAllowed(ownerCtx, 'addToRound', {
+      groupId: fx.gidA,
+      roundId,
+      membershipId: fx.memberMembershipA,
+    });
+    // 멤버십 상태 2종 — 내보냈다가 되살려서 순변화 0.
+    await expectAllowed(ownerCtx, 'removeMember', { groupId: fx.gidA, membershipId: fx.memberMembershipA });
+    await expectAllowed(ownerCtx, 'restoreMember', { groupId: fx.gidA, membershipId: fx.memberMembershipA });
 
     // 재발급 2종 — 액션이 돌려준 새 토큰이 **DB에 실제로 들어갔는지**까지 본다.
     // 거부 케이스는 "토큰이 안 변했다"를 단언했으므로, 대조군은 그 반대를 보여야 짝이 맞는다.
@@ -742,16 +875,20 @@ test.describe('인가 매트릭스', () => {
     });
     const newPublic = /"publicToken":"([^"]+)"/.exec(publicBody)![1];
 
-    const { tokens: tokensBefore, ...countsBefore } = before;
-    const { tokens: tokensAfter, ...countsAfter } = await writeCounts();
+    const { tokens: tokensBefore, memberStates: statesBefore, ...countsBefore } = before;
+    const { tokens: tokensAfter, memberStates: statesAfter, ...countsAfter } = await writeCounts();
     // 지출 1 + 정정 1 + 납부 1 + 납부취소 역분개 1 = 원장 4줄. 회차 1개.
+    // 새 회차의 명단은 그 순간의 활동 중 멤버 = 총무·철수 2명(탈주는 이미 나갔다). 빼고 넣어 순증 0.
     // 납부 기록은 체크로 생기고 취소로 지워지므로 순증 0 — ADR-001의 "원장은 지우지 않는다"가
     // dues_payments와 원장에서 각각 다르게 나타난다는 것까지 이 숫자가 담고 있다.
     expect(countsAfter).toEqual({
       entries: countsBefore.entries + 4,
       payments: countsBefore.payments,
       rounds: countsBefore.rounds + 1,
+      roster: countsBefore.roster + 2,
     });
+    // 내보내고 되살렸으므로 상태 문자열이 처음과 같다 — 거부 케이스의 동일성 단언과 짝이다.
+    expect(statesAfter).toBe(statesBefore);
     // 토큰은 **달라져야** 한다 — 이 한 줄이 거부 케이스의 `tokens` 동일성 단언이
     // "애초에 변할 수 없는 값"을 본 것이 아님을 증명한다.
     expect(tokensAfter, '재발급했는데 토큰이 그대로다').not.toBe(tokensBefore);

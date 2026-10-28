@@ -12,7 +12,7 @@ import { createGroup, INVITE_JOIN_URL, newClientContext, signUp, testEmail } fro
  *  2. 타이핑 확인이 실재하는가(문구가 맞기 전에는 버튼이 눌리지 않는가)
  *  3. 탈퇴 뒤 **브라우저에 남은 진짜 세션 쿠키**가 더 이상 통하는가 — 화면(리다이렉트)과
  *     서버 액션(UNAUTHENTICATED) **양쪽에서**
- *  4. 남은 멤버가 보는 화면에 `탈퇴한 멤버`가 그 자리에 있는가
+ *  4. 남은 멤버가 보는 화면에서 탈퇴자가 '나간 멤버'로 옮겨 가는가
  *
  * ── 왜 `authz.spec.ts`의 매트릭스에 넣지 않았는가 ───────────────────────────
  * 그 매트릭스는 **모임 스코프 쓰기**의 인가를 본다(`groupActionClient`: 총무/멤버/비멤버).
@@ -175,15 +175,19 @@ test.describe('회원 탈퇴', () => {
     expect(await replayDeleteAccount(anonCtx)).toBe('UNAUTHENTICATED');
   });
 
-  test('남은 총무의 화면에서 탈퇴자는 이름만 바뀐 채 그 자리에 있다', async () => {
+  test('남은 총무의 화면에서 탈퇴자는 나간 멤버로 옮겨 가고 이름만 바뀐다', async () => {
     const page = await ownerCtx.newPage();
     await page.goto(`/groups/${fx.gid}/settings`);
-    const rows = page.getByTestId('member-row');
-    // 멤버십 행을 **지우지 않으므로** 인원이 줄지 않는다 — 지웠다면 과거 회비 납부 체크가
-    // 함께 사라져 낸 사람이 안 낸 사람이 된다(ADR-004).
-    await expect(rows, '탈퇴로 멤버 행이 사라졌다').toHaveCount(2);
-    await expect(rows.filter({ hasText: '탈퇴한 멤버' })).toHaveCount(1);
-    await expect(page.getByTestId('member-row').filter({ hasText: '민지' })).toHaveCount(0);
+    // 활동 중 멤버 목록에서는 빠진다 — 탈퇴는 모든 모임을 떠나는 것이다(ADR-005).
+    await expect(page.getByTestId('member-row')).toHaveCount(1);
+    // 멤버십 행은 **지우지 않으므로** 나간 멤버로 남는다 — 지웠다면 과거 납부가 함께 사라진다(ADR-004).
+    const left = page.getByTestId('left-member-row');
+    await expect(left, '탈퇴자가 나간 멤버에 없다').toHaveCount(1);
+    await expect(left).toContainText('탈퇴한 멤버');
+    await expect(left).toContainText('탈퇴');
+    // 이름이 파기된 멤버십은 되살릴 수 없다 — 버튼 자체가 없다.
+    await expect(left.getByTestId('restore-member')).toHaveCount(0);
+    await expect(left, '나간 멤버 행에 원래 이름이 남았다').not.toContainText('민지');
     await page.close();
   });
 

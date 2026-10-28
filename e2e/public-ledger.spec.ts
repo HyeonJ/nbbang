@@ -207,6 +207,8 @@ test.describe('공개 장부 — 링크 하나로 열리되 그 밖의 것은 �
     await expect(leaverPage).toHaveURL(/\/groups\/[^/]+$/);
 
     await ownerPage.goto(`/groups/${fx.groupId}/dues/${roundId}`);
+    // 회차를 만든 뒤 합류했으므로 명단에 넣어야 그 회차의 납부를 받을 수 있다(ADR-005).
+    await ownerPage.getByRole('button', { name: `${LEAVER_NAME} 명단에 추가` }).click();
     // 토글이 둘(민지=납부 완료 안쪽, 탈퇴자=미납)이므로 testid로는 좁혀지지 않는다 — 이름으로 집는다.
     await ownerPage.getByRole('button', { name: `${LEAVER_NAME} 납부 체크` }).click();
     await expect(ownerPage.getByTestId('round-total-collected')).toHaveText(/40,000/);
@@ -278,13 +280,11 @@ test.describe('공개 장부 — 링크 하나로 열리되 그 밖의 것은 �
     await expect(page.getByTestId('public-group-name')).toHaveText('공개모임');
     // 잔액 = 회비 20,000 × 2 − 지출 9,000 (48,000은 정정돼 상쇄) = 31,000
     await expect(page.getByTestId('public-balance')).toHaveText(exactAmount('31,000'));
-    await expect(page.getByTestId('public-member')).toHaveCount(2);
+    // 공개 장부의 멤버 목록은 **활동 중인** 멤버다 — 탈퇴는 모임을 떠나는 것이다(ADR-005).
+    // 탈퇴자가 낸 회비는 원장 줄로 남는다(아래 '2026-01 탈퇴한 멤버' 단언) — 기록은 지워지지 않는다.
+    await expect(page.getByTestId('public-member')).toHaveCount(1);
     await expect(page.getByTestId('public-member').first()).toContainText('민지');
-    // 탈퇴자의 **자리는 남고 이름만 바뀐다** — 지우면 그 사람이 낸 회비가 없던 일이 된다(ADR-004).
-    await expect(
-      page.getByTestId('public-member').filter({ hasText: '탈퇴한 멤버' }),
-      '탈퇴자의 멤버 자리가 사라졌거나 이름이 그대로다',
-    ).toHaveCount(1);
+    await expect(page.getByTestId('public-member').filter({ hasText: '탈퇴한 멤버' })).toHaveCount(0);
 
     /**
      * 원장 **전부** — 지출 2 + 정정 1 + 회비 납부 1 = 4행 (direction.md Q3의 예외 = A).
