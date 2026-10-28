@@ -35,6 +35,7 @@ vi.mock('@/lib/auth', () => ({
 const { createExpense } = await import('@/actions/ledger');
 const { createSettlement } = await import('@/actions/settlement');
 const { createRound, markPaid, addToRound, removeFromRound } = await import('@/actions/dues');
+const { joinByInvite, leaveGroup, removeMember, restoreMember } = await import('@/actions/membership');
 
 type Member = { userId: string; membershipId: string; displayName: string };
 type Group = { gid: string; inviteToken: string; publicToken: string; owner: Member; members: Member[] };
@@ -66,6 +67,14 @@ async function markLeft(m: Member, reason: LeftReason) {
     .update(memberships)
     .set({ leftAt: new Date(), leftReason: reason })
     .where(eq(memberships.id, m.membershipId));
+}
+
+async function membershipState(m: Member) {
+  const [row] = await db
+    .select({ leftAt: memberships.leftAt, leftReason: memberships.leftReason, displayName: memberships.displayName })
+    .from(memberships)
+    .where(eq(memberships.id, m.membershipId));
+  return row;
 }
 
 /** 거부를 단언할 때 쓰는 포획기 — 성공하면 테스트가 실패한다. */
@@ -316,5 +325,121 @@ describe('명단 편집 — 경합과 모임 경계', () => {
     expect((await addToRound(input)).serverError).toBe('NOT_MEMBER');
     expect((await removeFromRound(input)).serverError).toBe('NOT_IN_ROSTER');
     expect(await rosterIds(roundId)).toEqual([g.owner.membershipId]);
+  });
+});
+
+describe('나가기 · 내보내기 · 되살리기 (D2·D4)', () => {
+  it('멤버는 스스로 나갈 수 있다 — left로 표시되고 행은 남는다', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    session.userId = chulsoo.userId;
+
+    const res = await leaveGroup({ groupId: g.gid });
+    expect(res.serverError).toBeUndefined();
+    const s = await membershipState(chulsoo);
+    expect(s.leftReason).toBe('left');
+    expect(s.leftAt).toBeInstanceOf(Date);
+    expect(s.displayName).toBe('철수');
+  });
+
+  it('총무는 나갈 수 없다 — OWNER_CANNOT_LEAVE', async () => {
+    const g = await seedGroup();
+    session.userId = g.owner.userId;
+    expect((await leaveGroup({ groupId: g.gid })).serverError).toBe('OWNER_CANNOT_LEAVE');
+    expect((await membershipState(g.owner)).leftReason).toBeNull();
+  });
+
+  it('총무는 멤버를 내보내고 되살릴 수 있다', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    session.userId = g.owner.userId;
+
+    expect((await removeMember({ groupId: g.gid, membershipId: chulsoo.membershipId })).serverError).toBeUndefined();
+    expect((await membershipState(chulsoo)).leftReason).toBe('removed');
+
+    expect((await restoreMember({ groupId: g.gid, membershipId: chulsoo.membershipId })).serverError).toBeUndefined();
+    const s = await membershipState(chulsoo);
+    expect(s.leftReason).toBeNull();
+    expect(s.leftAt).toBeNull();
+  });
+
+  it('총무는 자기 자신을 내보낼 수 없고, 스스로 나간 사람은 되살릴 수 없다', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    session.userId = g.owner.userId;
+    expect((await removeMember({ groupId: g.gid, membershipId: g.owner.membershipId })).serverError).toBe(
+      'NOT_MEMBER',
+    );
+
+    await markLeft(chulsoo, 'left');
+    expect((await restoreMember({ groupId: g.gid, membershipId: chulsoo.membershipId })).serverError).toBe(
+      'NOT_REMOVED',
+    );
+    expect((await membershipState(chulsoo)).leftReason).toBe('left');
+  });
+
+  it('멤버는 남을 내보내거나 되살릴 수 없다 — FORBIDDEN', async () => {
+    const g = await seedGroup(['철수', '영희']);
+    const [chulsoo, younghee] = g.members;
+    session.userId = chulsoo.userId;
+    expect((await removeMember({ groupId: g.gid, membershipId: younghee.membershipId })).serverError).toBe(
+      'FORBIDDEN',
+    );
+    expect((await restoreMember({ groupId: g.gid, membershipId: younghee.membershipId })).serverError).toBe(
+      'FORBIDDEN',
+    );
+  });
+
+  it('나간 사람이 다시 나가기를 누르면 NOT_MEMBER — 이미 모임 밖이다', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    await markLeft(chulsoo, 'left');
+    session.userId = chulsoo.userId;
+    expect((await leaveGroup({ groupId: g.gid })).serverError).toBe('NOT_MEMBER');
+  });
+});
+
+describe('초대 링크로 다시 들어오기 (D4)', () => {
+  it('스스로 나간 사람은 같은 멤버십으로 돌아오고 새 이름을 쓴다 — 과거 납부가 이어진다', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    const roundId = await newRound(g);
+    await markPaid({ groupId: g.gid, roundId, membershipId: chulsoo.membershipId });
+    await markLeft(chulsoo, 'left');
+
+    session.userId = chulsoo.userId;
+    const res = await joinByInvite({ token: g.inviteToken, displayName: '철수2' });
+    expect(res.serverError).toBeUndefined();
+    expect(res.data).toEqual({ groupId: g.gid, already: false });
+
+    const rows = await db
+      .select()
+      .from(memberships)
+      .where(and(eq(memberships.groupId, g.gid), eq(memberships.userId, chulsoo.userId)));
+    expect(rows, '재가입이 새 멤버십을 만들었다').toHaveLength(1);
+    expect(rows[0].id).toBe(chulsoo.membershipId);
+    expect(rows[0].leftReason).toBeNull();
+    expect(rows[0].displayName).toBe('철수2');
+    expect(await db.select().from(duesPayments).where(eq(duesPayments.membershipId, chulsoo.membershipId))).toHaveLength(1);
+  });
+
+  it('내보내진 사람은 링크로 돌아올 수 없다 — REMOVED_FROM_GROUP이고 상태가 그대로다', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    await markLeft(chulsoo, 'removed');
+
+    session.userId = chulsoo.userId;
+    const res = await joinByInvite({ token: g.inviteToken, displayName: '철수' });
+    expect(res.serverError).toBe('REMOVED_FROM_GROUP');
+    expect((await membershipState(chulsoo)).leftReason).toBe('removed');
+  });
+
+  it('활동 중인 멤버의 재합류는 already', async () => {
+    const g = await seedGroup(['철수']);
+    session.userId = g.members[0].userId;
+    expect((await joinByInvite({ token: g.inviteToken, displayName: '철수' })).data).toEqual({
+      groupId: g.gid,
+      already: true,
+    });
   });
 });

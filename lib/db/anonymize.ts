@@ -165,7 +165,13 @@ export async function anonymizeUserRows(tx: Tx, userId: string, email: string): 
       .where(inArray(settlementParticipants.membershipId, membershipIds));
     await tx
       .update(memberships)
-      .set({ displayName: ANONYMOUS_MEMBER_NAME })
+      .set({
+        displayName: ANONYMOUS_MEMBER_NAME,
+        // 탈퇴는 모든 모임을 떠나는 것이다(ADR-005). 이미 떠난 시각은 보존하고, 사유는
+        // `withdrawn`으로 덮는다 — `removed`로 남으면 총무가 이름이 파기된 멤버십을 되살릴 수 있다.
+        leftReason: 'withdrawn',
+        leftAt: sql`coalesce(${memberships.leftAt}, now())`,
+      })
       .where(eq(memberships.userId, userId));
 
     // ── 1-b. 앱이 쓴 회비 납부 메모 — **키로 지목된 행만** ──────────────────
