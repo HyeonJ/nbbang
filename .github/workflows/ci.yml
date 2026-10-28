@@ -53,6 +53,13 @@ jobs:
       - run: npm test
   e2e:
     runs-on: ubuntu-latest
+    # 이 잡은 **모든 실행이 같은 test 브랜치 DB 하나**를 쓴다(TEST_DATABASE_URL). e2e의 globalSetup은
+    # 그 DB를 TRUNCATE하므로, PR 실행과 main 실행이 겹치면 한쪽이 다른 쪽의 픽스처를 지워
+    # 원인과 무관한 자리에서 빨개진다. 워크플로 단위가 아니라 **DB 단위**로 직렬화한다.
+    # 대기열은 하나뿐이라 세 번째 실행이 오면 대기 중이던 것은 취소된다(GitHub 동작) — 다시 돌리면 된다.
+    concurrency:
+      group: nbbang-test-db
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -109,6 +116,11 @@ jobs:
     needs: [check, e2e]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # main 푸시가 연달아 오면 마이그레이션·배포가 겹치거나 옛 커밋이 나중에 끝나 새 배포를 덮을 수 있다.
+    # 진행 중인 배포는 끝까지 두고(중간 취소는 마이그레이션만 올라간 상태를 남긴다), 대기 중인 것은 최신으로 교체된다.
+    concurrency:
+      group: nbbang-production-deploy
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
