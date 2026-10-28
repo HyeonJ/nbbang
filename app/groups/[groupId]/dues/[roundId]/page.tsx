@@ -132,6 +132,7 @@ export default async function RoundPage({
                           roundId={round.id}
                           membershipId={m.membershipId}
                           displayName={m.displayName}
+                          left={m.left}
                         />
                         <PaymentToggle
                           groupId={groupId}
@@ -193,7 +194,7 @@ export default async function RoundPage({
             명단에 없는 멤버
           </h2>
           <p className="mt-2 text-[12px] leading-[1.7] text-muted">
-            회차를 만든 뒤 합류한 사람입니다. 이 회차에도 내야 하면 추가하세요.
+            이 회차 명단에 없는 활동 멤버입니다(나중에 합류했거나 면제된 사람). 내야 하면 추가하세요.
           </p>
           <div className="mt-3">
             <DataTable>

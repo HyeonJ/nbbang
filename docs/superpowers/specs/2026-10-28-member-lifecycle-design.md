@@ -63,7 +63,7 @@ FK (group_id, round_id, membership_id) → dues_round_members (group_id, round_i
 1. 탈퇴자: `user.deleted_at IS NOT NULL`인 사용자의 멤버십 → `left_at = user.deleted_at`, `left_reason = 'withdrawn'`.
 2. 기존 회차 명단 = **회차 생성 시점에 활동 중이던 멤버**(`joined_at <= created_at` 이고 그때 떠나지 않았음) ∪ **그 회차 납부자**. 합집합의 둘째 항은 3.3 FK가 백필 직후 성립하도록 보장하는 장치다(시계 오차·수동 데이터).
    - 회차 생성 **뒤에** 탈퇴한 사람은 그 회차 명단에 남는다(그 시점의 의무 — D3). 생성 **전에** 떠난 사람은 들어가지 않는다.
-3. 순서: 컬럼 추가 → 1 → 테이블 생성 → 2 → `dues_payments` FK 추가. FK를 마지막에 거는 이유는 백필 전에 걸면 기존 납부 행이 위반이기 때문이다.
+3. 순서: 테이블 생성 → 컬럼 추가 → 테이블 FK → CHECK → 백필(1, 2) → `dues_payments_roster_fk` 마지막. 순서가 중요한 것은 마지막 FK 하나뿐이다 — 백필 전에 걸면 기존 납부 행이 위반이므로 백필이 먼저여야 한다.
 
 ## 4. "활동 중" 기준이 적용되는 자리
 
