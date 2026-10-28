@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { isForeignKeyViolation, isUniqueViolation } from '@/lib/db/errors';
 import { getBalance } from '@/lib/db/queries';
 import {
   duesPayments,
+  duesRoundMembers,
   duesRounds,
   groups,
   ledgerEntries,
@@ -96,6 +97,8 @@ describe('테스트 정리 목록', () => {
     expect(TEST_TABLES).toEqual([
       '"public"."account"',
       '"public"."dues_payments"',
+      // Plan 05 회차 명단.
+      '"public"."dues_round_members"',
       '"public"."dues_rounds"',
       '"public"."groups"',
       '"public"."ledger_entries"',
@@ -194,9 +197,53 @@ describe('원장 제약 — 어느 제약이 막는지까지 고정한다', () =
   });
 });
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+class Rollback extends Error {}
+
+/**
+ * `shadow` 제약을 잠시 떼고 fn을 돌린 뒤 롤백한다(DDL도 트랜잭션적이다).
+ * 같은 쓰기를 두 FK가 함께 막을 때, 어느 쪽이 먼저 보고되는지는 RI 트리거 이름(OID 문자열) 순서라
+ * DB마다 다르다 — 그래서 원래 FK가 **혼자서도** 막는다는 것을 이렇게 따로 증명한다.
+ * 실패한 쓰기는 트랜잭션을 중단시키므로 세이브포인트(중첩 transaction)에서 잡는다.
+ */
+async function withoutConstraint(
+  table: string,
+  shadow: string,
+  fn: (tx: Tx) => Promise<unknown>,
+): Promise<unknown> {
+  let captured: unknown = null;
+  try {
+    await db.transaction(async (tx) => {
+      await tx.execute(sql.raw(`ALTER TABLE "${table}" DROP CONSTRAINT "${shadow}"`));
+      try {
+        await tx.transaction(async (sp) => {
+          await fn(sp);
+        });
+      } catch (e) {
+        captured = e;
+      }
+      throw new Rollback();
+    });
+  } catch (e) {
+    if (!(e instanceof Rollback)) throw e;
+  }
+  if (captured === null) throw new Error('거부될 것으로 기대한 쓰기가 성공했다');
+  return captured;
+}
+
+/** 위반된 제약 이름 — 둘 중 어느 쪽이 먼저 보고되는지는 DB마다 달라 "둘 중 하나"로만 단언한다. */
+function violatedConstraint(e: unknown): string | undefined {
+  const top = e as { constraint?: string; cause?: { constraint?: string } };
+  return top.constraint ?? top.cause?.constraint;
+}
+
 describe('dues_payments 복합 FK — 모임 경계를 DB가 막는다', () => {
   /** 같은 모임의 정상 납부 한 쌍(원장 엔트리 + 납부 기록). 아래 거부 테스트의 대조군이다. */
   async function paySelf(seed: Seed, roundId: string) {
+    await db
+      .insert(duesRoundMembers)
+      .values({ groupId: seed.gid, roundId, membershipId: seed.mid })
+      .onConflictDoNothing();
     const entry = await addEntry(seed, 'DUES_PAYMENT', 20_000);
     const id = crypto.randomUUID();
     await db.insert(duesPayments).values({
@@ -226,16 +273,22 @@ describe('dues_payments 복합 FK — 모임 경계를 DB가 막는다', () => {
     const round = await addRound(a, '2026-01');
     const entry = await addEntry(a, 'DUES_PAYMENT', 20_000);
 
-    const e = await captureError(() =>
-      db.insert(duesPayments).values({
-        id: crypto.randomUUID(),
-        groupId: a.gid,
-        roundId: round,
-        membershipId: b.mid, // 타 모임 멤버십
-        ledgerEntryId: entry.id,
-      }),
+    const row = {
+      id: crypto.randomUUID(),
+      groupId: a.gid,
+      roundId: round,
+      membershipId: b.mid, // 타 모임 멤버십
+      ledgerEntryId: entry.id,
+    };
+    // 이 쓰기는 membership_fk와 roster_fk가 함께 막는다 — 보고 순서는 DB마다 달라 둘 중 하나로 단언하고,
+    // 원래 FK는 roster_fk를 뗀 채로 따로 증명한다.
+    const e = await captureError(() => db.insert(duesPayments).values(row));
+    expect(isForeignKeyViolation(e)).toBe(true);
+    expect(['dues_payments_membership_fk', 'dues_payments_roster_fk']).toContain(violatedConstraint(e));
+    const alone = await withoutConstraint('dues_payments', 'dues_payments_roster_fk', (tx) =>
+      tx.insert(duesPayments).values(row),
     );
-    expect(isForeignKeyViolation(e, 'dues_payments_membership_fk')).toBe(true);
+    expect(isForeignKeyViolation(alone, 'dues_payments_membership_fk')).toBe(true);
     expect(await db.select().from(duesPayments)).toHaveLength(0);
   });
 
@@ -245,16 +298,21 @@ describe('dues_payments 복합 FK — 모임 경계를 DB가 막는다', () => {
     const foreignRound = await addRound(b, '2026-01');
     const entry = await addEntry(a, 'DUES_PAYMENT', 20_000);
 
-    const e = await captureError(() =>
-      db.insert(duesPayments).values({
-        id: crypto.randomUUID(),
-        groupId: a.gid,
-        roundId: foreignRound,
-        membershipId: a.mid,
-        ledgerEntryId: entry.id,
-      }),
+    const row = {
+      id: crypto.randomUUID(),
+      groupId: a.gid,
+      roundId: foreignRound,
+      membershipId: a.mid,
+      ledgerEntryId: entry.id,
+    };
+    // round_fk와 roster_fk가 함께 막는다 — 둘 중 하나로 단언하고 원래 FK는 roster_fk를 뗀 채로 증명한다.
+    const e = await captureError(() => db.insert(duesPayments).values(row));
+    expect(isForeignKeyViolation(e)).toBe(true);
+    expect(['dues_payments_round_fk', 'dues_payments_roster_fk']).toContain(violatedConstraint(e));
+    const alone = await withoutConstraint('dues_payments', 'dues_payments_roster_fk', (tx) =>
+      tx.insert(duesPayments).values(row),
     );
-    expect(isForeignKeyViolation(e, 'dues_payments_round_fk')).toBe(true);
+    expect(isForeignKeyViolation(alone, 'dues_payments_round_fk')).toBe(true);
     expect(await db.select().from(duesPayments)).toHaveLength(0);
   });
 
@@ -263,6 +321,7 @@ describe('dues_payments 복합 FK — 모임 경계를 DB가 막는다', () => {
     const b = await seedGroup('B');
     const round = await addRound(a, '2026-01');
     const foreignEntry = await addEntry(b, 'DUES_PAYMENT', 20_000);
+    await db.insert(duesRoundMembers).values({ groupId: a.gid, roundId: round, membershipId: a.mid });
 
     const e = await captureError(() =>
       db.insert(duesPayments).values({
@@ -302,9 +361,49 @@ describe('dues_payments 복합 FK — 모임 경계를 DB가 막는다', () => {
     const round = await addRound(a, '2026-01');
     await paySelf(a, round);
 
-    const e = await captureError(() =>
-      db.delete(memberships).where(eq(memberships.id, a.mid)),
+    // 납부 FK와 명단 FK가 함께 막는다 — 둘 중 하나로 단언하고 납부 FK는 명단 FK를 뗀 채로 증명한다.
+    const e = await captureError(() => db.delete(memberships).where(eq(memberships.id, a.mid)));
+    expect(isForeignKeyViolation(e)).toBe(true);
+    expect(['dues_payments_membership_fk', 'dues_round_members_membership_fk']).toContain(violatedConstraint(e));
+    const alone = await withoutConstraint('dues_round_members', 'dues_round_members_membership_fk', (tx) =>
+      tx.delete(memberships).where(eq(memberships.id, a.mid)),
     );
-    expect(isForeignKeyViolation(e, 'dues_payments_membership_fk')).toBe(true);
+    expect(isForeignKeyViolation(alone, 'dues_payments_membership_fk')).toBe(true);
+  });
+
+  it('뗐다 붙인 제약이 제자리에 있다 — 롤백 실패가 뒤 테스트를 조용히 약화시키지 못한다', async () => {
+    const res = await db.execute(
+      sql.raw(`select conname from pg_constraint where conname in ('dues_payments_roster_fk','dues_round_members_membership_fk')`),
+    );
+    const names = (res.rows as { conname: string }[]).map((r) => r.conname).sort();
+    expect(names).toEqual(['dues_payments_roster_fk', 'dues_round_members_membership_fk']);
+  });
+
+  it('명단에 없는 사람의 납부는 거부된다 (dues_payments_roster_fk)', async () => {
+    const a = await seedGroup('민지');
+    const round = await addRound(a, '2026-01');
+    const entry = await addEntry(a, 'DUES_PAYMENT', 20_000);
+    const e = await captureError(() =>
+      db.insert(duesPayments).values({
+        id: crypto.randomUUID(),
+        groupId: a.gid,
+        roundId: round,
+        membershipId: a.mid,
+        ledgerEntryId: entry.id,
+      }),
+    );
+    expect(isForeignKeyViolation(e, 'dues_payments_roster_fk')).toBe(true);
+  });
+
+  it('납부한 사람은 명단에서 뺄 수 없다 (dues_payments_roster_fk)', async () => {
+    const a = await seedGroup('민지');
+    const round = await addRound(a, '2026-01');
+    await paySelf(a, round);
+    const e = await captureError(() =>
+      db
+        .delete(duesRoundMembers)
+        .where(and(eq(duesRoundMembers.roundId, round), eq(duesRoundMembers.membershipId, a.mid))),
+    );
+    expect(isForeignKeyViolation(e, 'dues_payments_roster_fk')).toBe(true);
   });
 });

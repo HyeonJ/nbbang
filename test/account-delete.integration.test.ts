@@ -11,6 +11,7 @@ import {
 import {
   account,
   duesPayments,
+  duesRoundMembers,
   duesRounds,
   groups,
   ledgerEntries,
@@ -189,6 +190,10 @@ async function seed(): Promise<Fixture> {
 
   const roundId = crypto.randomUUID();
   await db.insert(duesRounds).values({ id: roundId, groupId: gid, period: '2026-02', amountPerPerson: 20_000 });
+  await db.insert(duesRoundMembers).values([
+    { groupId: gid, roundId, membershipId: leaverMembershipId },
+    { groupId: gid, roundId, membershipId: twinMembershipId },
+  ]);
   // 탈퇴자가 **낸** 회차. 멤버십 행을 지우면 이 체크가 사라져 과거 회차가 "미납"이 된다.
   await db.insert(duesPayments).values({
     id: crypto.randomUUID(),
@@ -430,6 +435,7 @@ describe('회원 탈퇴 — 식별자 파기', () => {
       'user.id': '내부 UUID — FK 셋이 참조한다. 보존이 ADR-004 결정 2(a)의 명시된 한계다',
       'memberships.id': '멤버십 식별자 — dues_payments·정산 3종이 이 값으로 매달려 있다',
       'memberships.user_id': 'user.id와 같은 값. 지우면 FK가 깨진다(notNull)',
+      'memberships.left_reason': "'left' | 'removed' | 'withdrawn' — 사람의 식별자가 아니다",
       'memberships.group_id': '어느 모임인지 — 사람의 식별자가 아니다',
       'memberships.role': "'owner' | 'member' — 사람의 식별자가 아니다",
       'settlement_participants.id': '스냅샷 행 식별자',
