@@ -22,7 +22,15 @@ export default function LeaveGroupPanel({ groupId, groupName }: { groupId: strin
       router.refresh();
     },
     onError({ error }) {
-      if (error.serverError === 'UNAUTHENTICATED') router.push(`/login?next=/groups/${groupId}`);
+      if (error.serverError === 'UNAUTHENTICATED') {
+        router.push(`/login?next=/groups/${groupId}`);
+        return;
+      }
+      // 다른 탭에서 이미 나갔거나 내보내졌다 — 이 화면은 더 이상 볼 수 없다.
+      if (error.serverError === 'NOT_MEMBER') {
+        router.replace('/groups');
+        router.refresh();
+      }
     },
   });
   const code = result.serverError;
