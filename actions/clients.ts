@@ -1,5 +1,5 @@
 import { createSafeActionClient } from 'next-safe-action';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/lib/db';
 import { UserDeletedError } from '@/lib/db/anonymize';
@@ -45,7 +45,12 @@ export const groupActionClient = authActionClient.use(async ({ next, ctx, client
   const parsed = z.object({ groupId: z.string() }).safeParse(clientInput);
   if (!parsed.success) throw new ActionError('INVALID_INPUT');
   const m = await db.query.memberships.findFirst({
-    where: and(eq(memberships.groupId, parsed.data.groupId), eq(memberships.userId, ctx.userId)),
+    where: and(
+      eq(memberships.groupId, parsed.data.groupId),
+      eq(memberships.userId, ctx.userId),
+      // 페이지 쪽 getGroupForMember와 **같은** 판정이어야 한다 — 갈리면 화면은 404인데 액션은 통과한다.
+      isNull(memberships.leftAt),
+    ),
   });
   if (!m) throw new ActionError('NOT_MEMBER');
   return next({ ctx: { ...ctx, groupId: parsed.data.groupId, role: m.role, membershipId: m.id } });

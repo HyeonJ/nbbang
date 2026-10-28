@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, or, sql, sum } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNotNull, isNull, or, sql, sum } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/lib/db';
 import {
@@ -18,12 +18,19 @@ export async function getGroupForMember(groupId: string, userId: string) {
     .select({ group: groups, membership: memberships })
     .from(memberships)
     .innerJoin(groups, eq(memberships.groupId, groups.id))
-    .where(and(eq(memberships.groupId, groupId), eq(memberships.userId, userId)))
+    .where(
+      and(
+        eq(memberships.groupId, groupId),
+        eq(memberships.userId, userId),
+        // 떠난 사람은 비멤버와 같다 — 모든 모임 페이지·CSV 라우트가 이 한 줄로 막힌다(ADR-005).
+        isNull(memberships.leftAt),
+      ),
+    )
     .limit(1);
   return rows[0] ?? null;
 }
 
-/** 모임의 멤버 목록 — 총무 먼저, 이후 합류일 순. */
+/** 모임의 **활동 중** 멤버 목록 — 총무 먼저, 이후 합류일 순. 나간 사람은 `getLeftMembers`. */
 export async function getGroupMembers(groupId: string) {
   return db
     .select({
@@ -33,11 +40,25 @@ export async function getGroupMembers(groupId: string) {
       joinedAt: memberships.joinedAt,
     })
     .from(memberships)
-    .where(eq(memberships.groupId, groupId))
+    .where(and(eq(memberships.groupId, groupId), isNull(memberships.leftAt)))
     .orderBy(
       sql`case when ${memberships.role} = 'owner' then 0 else 1 end`,
       asc(memberships.joinedAt),
     );
+}
+
+/** 떠난 멤버 — 최근에 떠난 순. 설정 화면의 "나간 멤버" 섹션과 되살리기가 쓴다. */
+export async function getLeftMembers(groupId: string) {
+  return db
+    .select({
+      id: memberships.id,
+      displayName: memberships.displayName,
+      leftAt: memberships.leftAt,
+      leftReason: memberships.leftReason,
+    })
+    .from(memberships)
+    .where(and(eq(memberships.groupId, groupId), isNotNull(memberships.leftAt)))
+    .orderBy(desc(memberships.leftAt));
 }
 
 /**

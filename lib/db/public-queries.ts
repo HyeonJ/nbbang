@@ -1,4 +1,4 @@
-import { asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { groups, ledgerEntries, memberships } from './schema';
 
@@ -91,7 +91,7 @@ export async function getPublicLedger(token: string): Promise<PublicLedger | nul
     db
       .select({ displayName: memberships.displayName, role: memberships.role })
       .from(memberships)
-      .where(eq(memberships.groupId, group.id))
+      .where(and(eq(memberships.groupId, group.id), isNull(memberships.leftAt)))
       .orderBy(asc(memberships.joinedAt)),
   ]);
 
