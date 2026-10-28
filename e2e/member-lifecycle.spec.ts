@@ -66,6 +66,8 @@ test.describe('멤버 생명주기', () => {
     await op.goto(`/groups/${fx.groupId}/dues/${fx.roundId}`);
     await expect(op.getByTestId('round-total-expected')).toHaveText(exactAmount('20,000'));
     await expect(op.getByTestId('roster-addable-row')).toHaveCount(1);
+    await expect(op.getByTestId('roster-addable-row')).toContainText('철수');
+    await expect(op.getByTestId('payment-row').filter({ hasText: '철수' })).toHaveCount(0);
 
     await op.getByRole('button', { name: '철수 명단에 추가' }).click();
     await expect(op.getByTestId('round-total-expected')).toHaveText(exactAmount('40,000'));
@@ -77,6 +79,8 @@ test.describe('멤버 생명주기', () => {
     await mp.goto(`/groups/${fx.groupId}`);
     await mp.getByTestId('leave-group').click();
     await expect(mp).toHaveURL(/\/groups$/);
+    // 목록 화면이 그려진 뒤에 부재를 본다 — 전환 중의 빈 화면에서 통과하지 않게.
+    await expect(mp.getByTestId('page-title')).toHaveText('내 모임');
     await expect(mp.getByText('생명주기모임')).toHaveCount(0);
 
     const res = await mp.goto(`/groups/${fx.groupId}`);
