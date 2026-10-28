@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { getActiveSession } from '@/lib/session';
 import { db } from '@/lib/db';
 import { groups, memberships } from '@/lib/db/schema';
@@ -21,7 +21,7 @@ export default async function GroupsPage() {
     })
     .from(memberships)
     .innerJoin(groups, eq(memberships.groupId, groups.id))
-    .where(eq(memberships.userId, session.user.id));
+    .where(and(eq(memberships.userId, session.user.id), isNull(memberships.leftAt)));
 
   return (
     <main className="mx-auto max-w-3xl px-5 pb-20">

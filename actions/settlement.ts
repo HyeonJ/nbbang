@@ -1,6 +1,6 @@
 'use server';
 import { z } from 'zod';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { groupActionClient, assertOwner, ActionError } from './clients';
 import { db } from '@/lib/db';
@@ -91,7 +91,14 @@ export const createSettlement = groupActionClient
     const rows = await db
       .select({ id: memberships.id, displayName: memberships.displayName })
       .from(memberships)
-      .where(and(eq(memberships.groupId, ctx.groupId), inArray(memberships.id, ids)));
+      .where(
+        and(
+          eq(memberships.groupId, ctx.groupId),
+          inArray(memberships.id, ids),
+          // 나간 사람에게 새 채무를 지울 수 없다. 과거 정산은 스냅샷이라 영향이 없다(ADR-003).
+          isNull(memberships.leftAt),
+        ),
+      );
     if (rows.length !== ids.length) throw new ActionError('NOT_MEMBER');
     const nameById = new Map(rows.map((m) => [m.id, m.displayName]));
 
