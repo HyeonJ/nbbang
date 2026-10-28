@@ -407,6 +407,7 @@ INSERT INTO "dues_round_members" ("group_id", "round_id", "membership_id")
 SELECT r."group_id", r."id", m."id"
   FROM "dues_rounds" AS r
   JOIN "memberships" AS m ON m."group_id" = r."group_id" AND m."joined_at" <= r."created_at"
+                         AND (m."left_at" IS NULL OR m."left_at" > r."created_at")
 UNION
 SELECT p."group_id", p."round_id", p."membership_id"
   FROM "dues_payments" AS p
@@ -599,7 +600,7 @@ describe('마이그레이션 0008 백필', () => {
     await db.insert(duesRoundMembers).values({ groupId: a.gid, roundId: round, membershipId: a.mid });
 ```
 
-"타 모임 membership_id"·"타 모임 round_id" 두 테스트는 명단 행을 만들 수 없는 조합이다(명단에도 같은 모임 FK가 있다). 이 둘은 원래 FK와 roster FK를 **동시에** 위반한다. Postgres는 같은 이벤트의 RI 트리거를 이름(`RI_ConstraintTrigger_c_<oid>`) 순으로 실행하므로, 먼저 만들어진 원래 FK가 먼저 보고될 것으로 예상한다. 기존 단언은 그대로 둔다. **만약 `dues_payments_roster_fk`가 보고되면** 단언을 바꾸지 말고 멈추고 보고한다(트리거 순서 가정이 틀린 것이라 테스트 설계를 다시 정해야 한다).
+"타 모임 membership_id"·"타 모임 round_id"·"납부한 멤버십 삭제" 세 테스트는 원래 FK와 새 명단 FK가 **같은 쓰기를 함께** 막는다. 보고 순서는 RI 트리거 이름(OID) 순서라 DB마다 달라 의존하지 않는다. 그래서 각 테스트는 (1) 정상 설정에서 "둘 중 하나의 제약"으로 거부됨을 단언하고, (2) `withoutConstraint`로 가리는 제약(roster FK 또는 `dues_round_members_membership_fk`)을 트랜잭션 안에서 떼고 롤백하여 원래 FK가 혼자서도 막는다는 것을 따로 증명한다. 롤백 뒤 두 제약이 제자리에 있는지도 확인한다.
 
 같은 파일 `describe('테스트 정리 목록')`의 기대 배열에서 `'"public"."dues_payments"',` 다음 줄에 추가:
 

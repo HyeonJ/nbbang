@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { isForeignKeyViolation, isUniqueViolation } from '@/lib/db/errors';
+import { constraintOf, isForeignKeyViolation, isUniqueViolation } from '@/lib/db/errors';
 import { getBalance } from '@/lib/db/queries';
 import {
   duesPayments,
@@ -231,12 +231,6 @@ async function withoutConstraint(
   return captured;
 }
 
-/** 위반된 제약 이름 — 둘 중 어느 쪽이 먼저 보고되는지는 DB마다 달라 "둘 중 하나"로만 단언한다. */
-function violatedConstraint(e: unknown): string | undefined {
-  const top = e as { constraint?: string; cause?: { constraint?: string } };
-  return top.constraint ?? top.cause?.constraint;
-}
-
 describe('dues_payments 복합 FK — 모임 경계를 DB가 막는다', () => {
   /** 같은 모임의 정상 납부 한 쌍(원장 엔트리 + 납부 기록). 아래 거부 테스트의 대조군이다. */
   async function paySelf(seed: Seed, roundId: string) {
@@ -284,7 +278,7 @@ describe('dues_payments 복합 FK — 모임 경계를 DB가 막는다', () => {
     // 원래 FK는 roster_fk를 뗀 채로 따로 증명한다.
     const e = await captureError(() => db.insert(duesPayments).values(row));
     expect(isForeignKeyViolation(e)).toBe(true);
-    expect(['dues_payments_membership_fk', 'dues_payments_roster_fk']).toContain(violatedConstraint(e));
+    expect(['dues_payments_membership_fk', 'dues_payments_roster_fk']).toContain(constraintOf(e));
     const alone = await withoutConstraint('dues_payments', 'dues_payments_roster_fk', (tx) =>
       tx.insert(duesPayments).values(row),
     );
@@ -308,7 +302,7 @@ describe('dues_payments 복합 FK — 모임 경계를 DB가 막는다', () => {
     // round_fk와 roster_fk가 함께 막는다 — 둘 중 하나로 단언하고 원래 FK는 roster_fk를 뗀 채로 증명한다.
     const e = await captureError(() => db.insert(duesPayments).values(row));
     expect(isForeignKeyViolation(e)).toBe(true);
-    expect(['dues_payments_round_fk', 'dues_payments_roster_fk']).toContain(violatedConstraint(e));
+    expect(['dues_payments_round_fk', 'dues_payments_roster_fk']).toContain(constraintOf(e));
     const alone = await withoutConstraint('dues_payments', 'dues_payments_roster_fk', (tx) =>
       tx.insert(duesPayments).values(row),
     );
@@ -364,7 +358,7 @@ describe('dues_payments 복합 FK — 모임 경계를 DB가 막는다', () => {
     // 납부 FK와 명단 FK가 함께 막는다 — 둘 중 하나로 단언하고 납부 FK는 명단 FK를 뗀 채로 증명한다.
     const e = await captureError(() => db.delete(memberships).where(eq(memberships.id, a.mid)));
     expect(isForeignKeyViolation(e)).toBe(true);
-    expect(['dues_payments_membership_fk', 'dues_round_members_membership_fk']).toContain(violatedConstraint(e));
+    expect(['dues_payments_membership_fk', 'dues_round_members_membership_fk']).toContain(constraintOf(e));
     const alone = await withoutConstraint('dues_round_members', 'dues_round_members_membership_fk', (tx) =>
       tx.delete(memberships).where(eq(memberships.id, a.mid)),
     );

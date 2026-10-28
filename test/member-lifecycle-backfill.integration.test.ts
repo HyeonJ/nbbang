@@ -35,7 +35,11 @@ const at = (iso: string) => new Date(iso);
 type Outcome = {
   roster: { roundId: string; membershipId: string }[];
   states: { id: string; leftAt: Date | null; leftReason: string | null }[];
-  ids: Record<'owner' | 'withdrawn' | 'latePayer' | 'newcomer' | 'r1' | 'r2', string>;
+  other: { roundId: string; membershipId: string }[];
+  ids: Record<
+    'owner' | 'withdrawn' | 'earlyLeaver' | 'boundary' | 'latePayer' | 'newcomer' | 'r1' | 'r2' | 'oRound' | 'oMember',
+    string
+  >;
 };
 
 describe('마이그레이션 0008 백필', () => {
@@ -62,9 +66,28 @@ describe('마이그레이션 0008 백필', () => {
           await tx.insert(memberships).values({ id, userId, groupId: gid, role, displayName: 'x', joinedAt });
           return id;
         };
+        // 두 번째 모임 — group 조건을 고정한다(이 모임의 회차에 1모임 멤버가, 1모임 회차에 이 모임 멤버가 섞이면 안 된다).
+        const gid2 = crypto.randomUUID();
+        await tx
+          .insert(groups)
+          .values({ id: gid2, name: '다른 모임', inviteToken: newToken(), publicToken: newToken() });
+        const oUser = await mkUser(null);
+        const oMember = crypto.randomUUID();
+        await tx
+          .insert(memberships)
+          .values({ id: oMember, userId: oUser, groupId: gid2, role: 'owner', displayName: 'o', joinedAt: at('2026-01-01T00:00:00Z') });
+        const oRound = crypto.randomUUID();
+        await tx
+          .insert(duesRounds)
+          .values({ id: oRound, groupId: gid2, period: '2026-01', amountPerPerson: 10_000, createdAt: at('2026-01-15T00:00:00Z') });
+
         const ownerUser = await mkUser(null);
         const owner = await mkMember(ownerUser, 'owner', at('2026-01-01T00:00:00Z'));
         const withdrawn = await mkMember(await mkUser(at('2026-05-01T00:00:00Z')), 'member', at('2026-01-02T00:00:00Z'));
+        // 1월 회차와 3월 회차 사이에 탈퇴 — 1월 명단에는 있고 3월 명단에는 없다(생성 전에 떠났다).
+        const earlyLeaver = await mkMember(await mkUser(at('2026-02-01T00:00:00Z')), 'member', at('2026-01-03T00:00:00Z'));
+        // joined_at이 1월 회차 created_at과 정확히 같다 — `<=`를 고정한다.
+        const boundary = await mkMember(await mkUser(null), 'member', at('2026-01-15T00:00:00Z'));
         // 1월 회차 **뒤에** 합류했지만 1월 회차 납부 기록이 있다(수동 데이터·시계 오차) — 합집합의 둘째 항.
         const latePayer = await mkMember(await mkUser(null), 'member', at('2026-02-10T00:00:00Z'));
         // 모든 회차 뒤에 합류 — 어느 명단에도 없어야 한다.
@@ -113,7 +136,11 @@ describe('마이그레이션 0008 백필', () => {
             .select({ id: memberships.id, leftAt: memberships.leftAt, leftReason: memberships.leftReason })
             .from(memberships)
             .where(eq(memberships.groupId, gid)),
-          ids: { owner, withdrawn, latePayer, newcomer, r1, r2 },
+          other: await tx
+            .select({ roundId: duesRoundMembers.roundId, membershipId: duesRoundMembers.membershipId })
+            .from(duesRoundMembers)
+            .where(eq(duesRoundMembers.groupId, gid2)),
+          ids: { owner, withdrawn, earlyLeaver, boundary, latePayer, newcomer, r1, r2, oRound, oMember },
         };
         throw new Rollback();
       });
@@ -121,21 +148,25 @@ describe('마이그레이션 0008 백필', () => {
       if (!(e instanceof Rollback)) throw e;
     }
 
-    const { roster, states, ids } = outcome!;
+    const { roster, other, states, ids } = outcome!;
     const of = (roundId: string) =>
       roster
         .filter((r) => r.roundId === roundId)
         .map((r) => r.membershipId)
         .sort();
 
-    expect(of(ids.r1)).toEqual([ids.owner, ids.withdrawn, ids.latePayer].sort());
-    expect(of(ids.r2)).toEqual([ids.owner, ids.withdrawn, ids.latePayer].sort());
+    expect(of(ids.r1)).toEqual([ids.owner, ids.withdrawn, ids.earlyLeaver, ids.boundary, ids.latePayer].sort());
+    expect(of(ids.r2)).toEqual([ids.owner, ids.withdrawn, ids.boundary, ids.latePayer].sort());
+    expect(other).toEqual([{ roundId: ids.oRound, membershipId: ids.oMember }]);
     expect(roster.some((r) => r.membershipId === ids.newcomer), '모든 회차 뒤 합류자가 명단에 들어갔다').toBe(false);
 
     const w = states.find((s) => s.id === ids.withdrawn)!;
     expect(w.leftReason).toBe('withdrawn');
     expect(w.leftAt?.toISOString()).toBe('2026-05-01T00:00:00.000Z');
-    for (const id of [ids.owner, ids.latePayer, ids.newcomer]) {
+    const el = states.find((s) => s.id === ids.earlyLeaver)!;
+    expect(el.leftReason).toBe('withdrawn');
+    expect(el.leftAt?.toISOString()).toBe('2026-02-01T00:00:00.000Z');
+    for (const id of [ids.owner, ids.boundary, ids.latePayer, ids.newcomer]) {
       expect(states.find((s) => s.id === id)!.leftReason, `${id}가 떠난 것으로 표시됐다`).toBeNull();
     }
 

@@ -27,6 +27,11 @@ function violates(e: unknown, code: string, constraint?: string): boolean {
   return constraint === undefined || err.constraint === constraint;
 }
 
+/** 위반된 제약 이름. 여러 제약이 같은 쓰기를 함께 막을 때 어느 쪽이 보고됐는지 본다. */
+export function constraintOf(e: unknown): string | undefined {
+  return pgError(e).constraint;
+}
+
 /** 23505 — 유니크 위반. */
 export function isUniqueViolation(e: unknown, constraint?: string): boolean {
   return violates(e, '23505', constraint);
