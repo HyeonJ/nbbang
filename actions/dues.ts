@@ -6,8 +6,9 @@ import { groupActionClient, assertOwner, ActionError } from './clients';
 import { revalidateLedger } from './revalidate';
 import { db } from '@/lib/db';
 import { assertActiveUser } from '@/lib/db/anonymize';
-import { isUniqueViolation } from '@/lib/db/errors';
+import { isForeignKeyViolation, isUniqueViolation } from '@/lib/db/errors';
 import { getRound } from '@/lib/db/queries';
+import { addToRoster, removeFromRoster, snapshotRoster } from '@/lib/db/roster';
 import { duesPayments, duesRounds, ledgerEntries, memberships } from '@/lib/db/schema';
 import { parsePeriod, DuesRuleError } from '@/lib/domain/dues';
 import { reversalAmount, signedAmount, LedgerRuleError } from '@/lib/domain/ledger';
@@ -37,11 +38,15 @@ export const createRound = groupActionClient
     if (dup) throw new ActionError('ROUND_EXISTS');
     const id = crypto.randomUUID();
     try {
-      await db.insert(duesRounds).values({
-        id,
-        groupId: ctx.groupId,
-        period,
-        amountPerPerson: parsedInput.amountPerPerson,
+      await db.transaction(async (tx) => {
+        await tx.insert(duesRounds).values({
+          id,
+          groupId: ctx.groupId,
+          period,
+          amountPerPerson: parsedInput.amountPerPerson,
+        });
+        // 명단은 이 순간의 활동 중 멤버로 고정된다(ADR-005 D1).
+        await snapshotRoster(tx, ctx.groupId, id);
       });
     } catch (e) {
       // 위 사전 확인과 이 insert 사이에는 트랜잭션이 없다 — 총무 둘이 같은 달 회차를 동시에 만들면
@@ -123,6 +128,9 @@ export const markPaid = groupActionClient
         });
       });
     } catch (e) {
+      // 명단 밖 사람이다. 판정은 dues_payments_roster_fk가 한다 — 사전 조회는 면제와의 경합을 막지 못한다.
+      // 트랜잭션이므로 원장 엔트리도 함께 롤백된다.
+      if (isForeignKeyViolation(e, 'dues_payments_roster_fk')) throw new ActionError('NOT_IN_ROSTER');
       // 중복 체크(같은 회차·멤버)는 dues_payments_round_membership 유니크 인덱스가 막는다.
       // 이미 납부인 사람에게 '체크'가 눌렸다는 건 내 화면이 낡았다는 뜻이다(reverseEntry의
       // ALREADY_REVERSED와 같은 판단) — 에러가 아닌 멱등 성공으로 돌려주되, 돌아가기 전에
@@ -214,6 +222,35 @@ export const unmarkPaid = groupActionClient
     }
     revalidatePayment(ctx.groupId, parsedInput.roundId);
     return { ok: true };
+  });
+
+const rosterInput = z.object({ groupId: z.string(), roundId: z.string(), membershipId: z.string() });
+
+/** 회차 명단에 활동 중 멤버를 넣는다 — 월 중간 합류자 등(ADR-005 D3). 이미 있으면 멱등 성공. */
+export const addToRound = groupActionClient
+  .inputSchema(rosterInput)
+  .action(async ({ parsedInput, ctx }) => {
+    assertOwner(ctx.role);
+    const round = await getRound(ctx.groupId, parsedInput.roundId);
+    if (!round) throw new ActionError('ROUND_NOT_FOUND');
+    const result = await addToRoster(ctx.groupId, round.id, parsedInput.membershipId);
+    if (result === 'not_active') throw new ActionError('NOT_MEMBER');
+    revalidatePayment(ctx.groupId, round.id);
+    return { already: result === 'already' };
+  });
+
+/** 회차 명단에서 뺀다(면제). 납부한 사람은 먼저 납부를 취소해야 한다. */
+export const removeFromRound = groupActionClient
+  .inputSchema(rosterInput)
+  .action(async ({ parsedInput, ctx }) => {
+    assertOwner(ctx.role);
+    const round = await getRound(ctx.groupId, parsedInput.roundId);
+    if (!round) throw new ActionError('ROUND_NOT_FOUND');
+    const result = await removeFromRoster(ctx.groupId, round.id, parsedInput.membershipId);
+    if (result === 'not_in_roster') throw new ActionError('NOT_IN_ROSTER');
+    if (result === 'paid') throw new ActionError('PAID_MEMBER');
+    revalidatePayment(ctx.groupId, round.id);
+    return { removed: true };
   });
 
 /** 납부는 잔액·회차 목록·이 회차 화면을 동시에 낡게 만든다 — 원장 화면들 + 회차 상세. */

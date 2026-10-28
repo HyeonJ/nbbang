@@ -10,6 +10,7 @@ const ERRORS: Record<string, string> = {
   FORBIDDEN: '총무만 납부를 체크할 수 있습니다.',
   ROUND_NOT_FOUND: '회차를 찾을 수 없습니다.',
   NOT_MEMBER: '모임 멤버가 아닙니다.',
+  NOT_IN_ROSTER: '이 회차 명단에 없는 사람입니다.',
   PAYMENT_NOT_FOUND: '납부 기록이 없습니다.',
 };
 

@@ -2,8 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { getPublicLedger } from '@/lib/db/public-queries';
-import { getGroupForMember, getGroupMembers, getLeftMembers } from '@/lib/db/queries';
-import { groups, memberships, settlements, user } from '@/lib/db/schema';
+import { constraintOf } from '@/lib/db/errors';
+import {
+  getGroupForMember,
+  getGroupMembers,
+  getLeftMembers,
+  getRoundRoster,
+  getRoundsWithCounts,
+} from '@/lib/db/queries';
+import { duesPayments, duesRoundMembers, groups, ledgerEntries, memberships, settlements, user } from '@/lib/db/schema';
 import type { LeftReason } from '@/lib/domain/member';
 import { newPublicToken, newToken } from '@/lib/domain/token';
 
@@ -27,6 +34,7 @@ vi.mock('@/lib/auth', () => ({
 
 const { createExpense } = await import('@/actions/ledger');
 const { createSettlement } = await import('@/actions/settlement');
+const { createRound, markPaid, addToRound, removeFromRound } = await import('@/actions/dues');
 
 type Member = { userId: string; membershipId: string; displayName: string };
 type Group = { gid: string; inviteToken: string; publicToken: string; owner: Member; members: Member[] };
@@ -58,6 +66,16 @@ async function markLeft(m: Member, reason: LeftReason) {
     .update(memberships)
     .set({ leftAt: new Date(), leftReason: reason })
     .where(eq(memberships.id, m.membershipId));
+}
+
+/** 거부를 단언할 때 쓰는 포획기 — 성공하면 테스트가 실패한다. */
+async function captureError(fn: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await fn();
+  } catch (e) {
+    return e;
+  }
+  throw new Error('거부될 것으로 기대한 쓰기가 성공했다');
 }
 
 beforeEach(() => {
@@ -125,15 +143,149 @@ describe('활동 중 판정 — 나간 사람은 모임에서 사라진다', () 
 
   it('CHECK — left_at과 left_reason은 함께 채워지거나 함께 비어 있다', async () => {
     const g = await seedGroup(['철수']);
-    // drizzle이 PG 오류를 "Failed query"로 감싸므로 제약 이름은 cause에 있다.
-    const error = await db
-      .update(memberships)
-      .set({ leftAt: new Date() })
-      .where(and(eq(memberships.id, g.members[0].membershipId), eq(memberships.groupId, g.gid)))
-      .then(
-        () => null,
-        (e: unknown) => e as { cause?: { message?: string } },
-      );
-    expect(error?.cause?.message).toMatch(/memberships_left_consistency/);
+    const error = await captureError(() =>
+      db.update(memberships).set({ leftAt: new Date() }).where(eq(memberships.id, g.members[0].membershipId)),
+    );
+    expect(constraintOf(error)).toBe('memberships_left_consistency');
+  });
+});
+
+/** 총무로 회차를 만들고 id를 돌려준다. */
+async function newRound(g: Group, period = '2026-10') {
+  session.userId = g.owner.userId;
+  const res = await createRound({ groupId: g.gid, period, amountPerPerson: 10_000 });
+  expect(res.serverError).toBeUndefined();
+  return res.data!.roundId;
+}
+
+const rosterIds = async (roundId: string) =>
+  (await getRoundRoster(roundId)).map((r) => r.membershipId).sort();
+
+describe('회차 명단 — 생성 시점에 고정된다 (D1)', () => {
+  it('만드는 순간의 활동 중 멤버만 들어가고, 나중에 합류한 사람은 없다', async () => {
+    const g = await seedGroup(['철수', '영희']);
+    const [chulsoo, younghee] = g.members;
+    await markLeft(younghee, 'left');
+
+    const roundId = await newRound(g);
+    expect(await rosterIds(roundId)).toEqual([g.owner.membershipId, chulsoo.membershipId].sort());
+
+    await addMember(g.gid, '늦게온사람', 'member');
+    expect(await rosterIds(roundId)).toEqual([g.owner.membershipId, chulsoo.membershipId].sort());
+  });
+
+  it('명단을 만든 뒤 떠난 사람은 명단에 남고 left로 표시된다', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    const roundId = await newRound(g);
+    await markLeft(chulsoo, 'left');
+
+    const roster = await getRoundRoster(roundId);
+    expect(roster.map((r) => [r.displayName, r.left])).toEqual([
+      ['총무', false],
+      ['철수', true],
+    ]);
+    const [row] = (await getRoundsWithCounts(g.gid)).filter((r) => r.id === roundId);
+    expect(row.rosterCount).toBe(2);
+  });
+});
+
+describe('납부는 명단 안에서만', () => {
+  it('명단 밖 사람의 납부 체크는 NOT_IN_ROSTER이고 원장에 아무것도 남지 않는다', async () => {
+    const g = await seedGroup();
+    const roundId = await newRound(g);
+    const late = await addMember(g.gid, '늦게온사람', 'member');
+
+    session.userId = g.owner.userId;
+    const res = await markPaid({ groupId: g.gid, roundId, membershipId: late.membershipId });
+    expect(res.serverError).toBe('NOT_IN_ROSTER');
+    expect(await db.select().from(ledgerEntries).where(eq(ledgerEntries.groupId, g.gid))).toHaveLength(0);
+  });
+
+  it('명단에 있다가 떠난 사람의 납부는 받는다 — 빚을 갚는 길은 열려 있다', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    const roundId = await newRound(g);
+    await markLeft(chulsoo, 'left');
+
+    session.userId = g.owner.userId;
+    const res = await markPaid({ groupId: g.gid, roundId, membershipId: chulsoo.membershipId });
+    expect(res.serverError).toBeUndefined();
+    expect(res.data).toEqual({ already: false });
+  });
+});
+
+describe('명단 편집 — 총무의 면제·추가 (D3)', () => {
+  it('미납자를 빼면 명단에서 사라진다', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    const roundId = await newRound(g);
+
+    session.userId = g.owner.userId;
+    const res = await removeFromRound({ groupId: g.gid, roundId, membershipId: chulsoo.membershipId });
+    expect(res.serverError).toBeUndefined();
+    expect(await rosterIds(roundId)).toEqual([g.owner.membershipId]);
+  });
+
+  it('납부한 사람은 뺄 수 없다 — PAID_MEMBER이고 명단·납부가 그대로다', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    const roundId = await newRound(g);
+    session.userId = g.owner.userId;
+    await markPaid({ groupId: g.gid, roundId, membershipId: chulsoo.membershipId });
+
+    const res = await removeFromRound({ groupId: g.gid, roundId, membershipId: chulsoo.membershipId });
+    expect(res.serverError).toBe('PAID_MEMBER');
+    expect(await rosterIds(roundId)).toContain(chulsoo.membershipId);
+    expect(await db.select().from(duesPayments).where(eq(duesPayments.roundId, roundId))).toHaveLength(1);
+  });
+
+  it('명단에 없는 사람을 빼면 NOT_IN_ROSTER', async () => {
+    const g = await seedGroup();
+    const roundId = await newRound(g);
+    const late = await addMember(g.gid, '늦게온사람', 'member');
+    session.userId = g.owner.userId;
+    const res = await removeFromRound({ groupId: g.gid, roundId, membershipId: late.membershipId });
+    expect(res.serverError).toBe('NOT_IN_ROSTER');
+  });
+
+  it('활동 중인 멤버를 넣을 수 있고, 두 번 넣어도 한 행이다', async () => {
+    const g = await seedGroup();
+    const roundId = await newRound(g);
+    const late = await addMember(g.gid, '늦게온사람', 'member');
+
+    session.userId = g.owner.userId;
+    expect((await addToRound({ groupId: g.gid, roundId, membershipId: late.membershipId })).data).toEqual({
+      already: false,
+    });
+    expect((await addToRound({ groupId: g.gid, roundId, membershipId: late.membershipId })).data).toEqual({
+      already: true,
+    });
+    expect(
+      await db
+        .select()
+        .from(duesRoundMembers)
+        .where(and(eq(duesRoundMembers.roundId, roundId), eq(duesRoundMembers.membershipId, late.membershipId))),
+    ).toHaveLength(1);
+  });
+
+  it('떠난 사람은 넣을 수 없다 — NOT_MEMBER', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    await markLeft(chulsoo, 'left');
+    const roundId = await newRound(g);
+    session.userId = g.owner.userId;
+    const res = await addToRound({ groupId: g.gid, roundId, membershipId: chulsoo.membershipId });
+    expect(res.serverError).toBe('NOT_MEMBER');
+  });
+
+  it('멤버(총무 아님)는 면제·추가 모두 FORBIDDEN', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    const roundId = await newRound(g);
+    session.userId = chulsoo.userId;
+    const input = { groupId: g.gid, roundId, membershipId: chulsoo.membershipId };
+    expect((await removeFromRound(input)).serverError).toBe('FORBIDDEN');
+    expect((await addToRound(input)).serverError).toBe('FORBIDDEN');
   });
 });
