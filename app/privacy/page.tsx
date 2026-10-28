@@ -256,8 +256,9 @@ export default function PrivacyPage() {
       <Section title="모임을 나가거나 내보내지면">
         <p className={BODY}>
           모임을 나가거나 총무에게 내보내져도 <b className="font-bold text-ink">계정은 그대로</b>입니다.
-          다만 그 모임의 기록 — 모임 표시 이름, 과거 회차 명단, 회비 납부 기록 줄 — 에는{' '}
-          <b className="font-bold text-ink">이름이 남고</b>, 공개 장부 링크로도 보입니다. 이름까지 지우려면
+          다만 그 모임의 기록 — 나간 멤버 목록, 과거 회차 명단, 회비 납부 기록 줄 — 에는{' '}
+          <b className="font-bold text-ink">이름이 남고</b>, 그중 회비 납부 기록 줄은 공개 장부 링크로도
+          보입니다. 이름까지 지우려면
           회원 탈퇴를 하세요. 탈퇴하면 위 &lsquo;탈퇴하면 지워지는 것&rsquo;대로 엔빵이 쓴 식별자가 파기됩니다.
         </p>
       </Section>
