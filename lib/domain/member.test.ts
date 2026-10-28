@@ -46,6 +46,20 @@ describe('parseDisplayName', () => {
     expect(parseDisplayName('\u200B철수\uFEFF ')).toBe('철수');
   });
 
+  it('한글 채움 문자만 있는 투명 이름은 INVALID_NAME', () => {
+    expect(thrownCode(() => parseDisplayName('\u3164'))).toBe('INVALID_NAME');
+  });
+
+  it('앞뒤의 한글 채움 문자·폭 없는 문자·공백은 잘라 저장한다', () => {
+    expect(parseDisplayName('\u3164철수')).toBe('철수');
+    expect(parseDisplayName('\u200B 철수 \u200B')).toBe('철수');
+  });
+
+  it('이름 안쪽의 공백과 폭 없는 문자는 그대로 둔다 — 이름은 유일하지 않아도 된다', () => {
+    expect(parseDisplayName(' 철 수 ')).toBe('철 수');
+    expect(parseDisplayName('철\u200B수')).toBe('철\u200B수');
+  });
+
   it('비슷하지만 다른 이름은 통과한다', () => {
     expect(parseDisplayName('탈퇴한 멤버2')).toBe('탈퇴한 멤버2');
   });
