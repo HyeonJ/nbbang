@@ -17,12 +17,15 @@
 
 ```
 groups                  id, name, inviteToken, publicToken, accountLabel?, createdAt
-memberships             id, userId × groupId, role(owner|member), displayName, joinedAt
+memberships             id, userId × groupId, role(owner|member), displayName, joinedAt,
+                        leftAt?, leftReason?(left|removed|withdrawn) — 둘은 CHECK로 함께 null/비null
 ledger_entries          ★불변 원장: id, groupId, type(DUES_PAYMENT|EXPENSE|REVERSAL),
                         amount(부호 있음), occurredAt, category?, memo?, createdBy,
                         subjectMembershipId?, reversalOf?, createdAt
 dues_rounds             id, groupId, period('YYYY-MM'), amountPerPerson, createdAt
-dues_payments           groupId, roundId × membershipId → ledgerEntryId (1:1)
+dues_round_members      roundId × membershipId (+ groupId) — 회차 명단 스냅샷, 복합 FK 2개
+dues_payments           groupId, roundId × membershipId → ledgerEntryId (1:1),
+                        dues_payments_roster_fk → dues_round_members (명단 밖 납부·납부자 명단 삭제 불가)
 settlements             id, groupId, title, total, payerMembershipId, occurredAt, createdBy
 settlement_participants settlementId × membershipId, displayNameAtTime, shareAmount, isPayer
 settlement_transfers    settlementId, from → to membershipId, amount
@@ -87,3 +90,4 @@ lib/db/             Drizzle 스키마·쿼리·트랜잭션
 | 2026-09-17 | **Plan 04 실사용 전 하드닝** — 공개 링크 레이트 리밋(미들웨어, IP는 HMAC만, 보관 최대 48시간) · 모임 완전 삭제(FK 전이 폐포 대조) · 회원 탈퇴 = 식별자 파기([ADR-004](../../adr/004-deletion-semantics.md)) · 개인정보처리방침 · 세션 행 IP/UA 미보관 |
 | 2026-10-27 | **P0: 탈퇴 시 앱이 쓴 납부 메모의 이름도 파기** — 파기 경계를 "자유 텍스트인가"에서 "누가 적었는가"로 개정(ADR-004 결정 2(b)). 키는 `ledger_entries.subject_membership_id`(납부 취소가 `dues_payments`를 지워도 남는다) |
 | 2026-10-28 | 전체 회고 — 정정 대상을 지출로 한정(회비 납부를 정정 경로로 되돌리면 납부 취소가 영구히 막히던 결함), CI의 test DB·배포 직렬화. **기획 공백 발견: 멤버가 모임을 떠나는 경우가 모델에 없다** → Plan 05 첫 항목([requirements §8](../../requirements.md)) |
+| 2026-10-28 | **Plan 05 멤버 생명주기** — 떠남은 상태(`left_at`/`left_reason`), 회차 명단은 생성 시점 스냅샷, 납부는 명단 안에서만([ADR-005](../../adr/005-member-lifecycle.md)) |
