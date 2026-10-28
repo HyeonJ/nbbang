@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { UserDeletedError } from '@/lib/db/anonymize';
 import { memberships } from '@/lib/db/schema';
+import { MemberRuleError, parseDisplayName } from '@/lib/domain/member';
 import { getActiveSession } from '@/lib/session';
 
 export class ActionError extends Error {
@@ -58,4 +59,13 @@ export const groupActionClient = authActionClient.use(async ({ next, ctx, client
 
 export function assertOwner(role: string) {
   if (role !== 'owner') throw new ActionError('FORBIDDEN');
+}
+
+/** 표시 이름 검증을 액션 코드로 옮긴다. 화면이 코드별 문구를 고르므로 zod가 아니라 여기서 본다. */
+export function displayNameOrThrow(input: string): string {
+  try {
+    return parseDisplayName(input);
+  } catch (e) {
+    throw e instanceof MemberRuleError ? new ActionError(e.code) : e;
+  }
 }

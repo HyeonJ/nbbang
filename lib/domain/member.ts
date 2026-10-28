@@ -11,11 +11,14 @@ export class MemberRuleError extends Error {
  */
 export const ANONYMOUS_MEMBER_NAME = '탈퇴한 멤버';
 
-const squash = (s: string) => s.replace(/\s+/g, '');
+// 공백과 폭 없는 문자는 화면에 보이지 않으므로 빈 이름·예약 이름 판정에서 모두 무시한다.
+const INVISIBLE = /[\s\u200B-\u200D\uFEFF]+/g;
+const EDGE_INVISIBLE = /^[\s\u200B-\u200D\uFEFF]+|[\s\u200B-\u200D\uFEFF]+$/g;
+const squash = (s: string) => s.replace(INVISIBLE, '');
 
 export function parseDisplayName(input: string): string {
-  const name = input.trim();
-  if (name === '') throw new MemberRuleError('INVALID_NAME');
+  const name = input.replace(EDGE_INVISIBLE, '');
+  if (squash(name) === '') throw new MemberRuleError('INVALID_NAME');
   // 공백만 바꿔 끼운 변형도 화면에서는 같은 표지로 읽힌다.
   if (squash(name) === squash(ANONYMOUS_MEMBER_NAME)) throw new MemberRuleError('RESERVED_NAME');
   return name;

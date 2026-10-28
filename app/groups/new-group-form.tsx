@@ -7,6 +7,11 @@ import { createGroup } from '@/actions/group';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 
+const NAME_ERRORS: Record<string, string> = {
+  INVALID_NAME: '모임에서 쓸 내 이름을 입력해 주세요.',
+  RESERVED_NAME: '이 이름은 쓸 수 없습니다. 다른 이름을 입력해 주세요.',
+};
+
 export default function NewGroupForm() {
   const router = useRouter();
   const [name, setName] = useState('');
@@ -50,7 +55,7 @@ export default function NewGroupForm() {
       </Button>
       {result.serverError && (
         <p role="alert" className="border-l-2 border-ink pl-3 text-[13px] leading-[1.7]">
-          모임 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.
+          {NAME_ERRORS[result.serverError] ?? '모임 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.'}
         </p>
       )}
     </form>
