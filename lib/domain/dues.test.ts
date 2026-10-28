@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { unpaidMembers, roundTotals, parsePeriod, DuesRuleError } from '@/lib/domain/dues';
+import { unpaidMembers, roundTotals, parsePeriod, DuesRuleError, noticeNames, rosterLabel } from '@/lib/domain/dues';
 
 const members = [
   { membershipId: 'm1', displayName: '민지' },
@@ -90,5 +90,30 @@ describe('parsePeriod', () => {
   });
   it('거절 사유는 INVALID_PERIOD 코드로 올라간다', () => {
     expect(thrownCode(() => parsePeriod('2026-13'))).toBe('INVALID_PERIOD');
+  });
+});
+
+describe('회차 명단 표기', () => {
+  const roster = [
+    { membershipId: 'm1', displayName: '민지', left: false },
+    { membershipId: 'm2', displayName: '철수', left: true },
+    { membershipId: 'm3', displayName: '영희', left: false },
+  ];
+
+  it('미납 안내 문구에는 활동 중인 미납자만 들어간다 — 나간 사람은 단톡방에 없다', () => {
+    expect(noticeNames(unpaidMembers(roster, ['m3']))).toEqual(['민지']);
+  });
+
+  it('나간 사람은 화면에서 (나감)이 붙는다', () => {
+    expect(rosterLabel(roster[1])).toBe('철수 (나감)');
+    expect(rosterLabel(roster[0])).toBe('민지');
+  });
+
+  it('roundTotals는 회차 명단 인원으로 계산한다', () => {
+    expect(roundTotals(20_000, roster.length, ['m1'])).toEqual({
+      expected: 60_000,
+      collected: 20_000,
+      outstanding: 40_000,
+    });
   });
 });
