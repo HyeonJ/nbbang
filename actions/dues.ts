@@ -130,7 +130,11 @@ export const markPaid = groupActionClient
     } catch (e) {
       // 명단 밖 사람이다. 판정은 dues_payments_roster_fk가 한다 — 사전 조회는 면제와의 경합을 막지 못한다.
       // 트랜잭션이므로 원장 엔트리도 함께 롤백된다.
-      if (isForeignKeyViolation(e, 'dues_payments_roster_fk')) throw new ActionError('NOT_IN_ROSTER');
+      // 화면이 낡았다는 뜻이다 — 새로 받게 한 뒤 알린다.
+      if (isForeignKeyViolation(e, 'dues_payments_roster_fk')) {
+        revalidatePayment(ctx.groupId, parsedInput.roundId);
+        throw new ActionError('NOT_IN_ROSTER');
+      }
       // 중복 체크(같은 회차·멤버)는 dues_payments_round_membership 유니크 인덱스가 막는다.
       // 이미 납부인 사람에게 '체크'가 눌렸다는 건 내 화면이 낡았다는 뜻이다(reverseEntry의
       // ALREADY_REVERSED와 같은 판단) — 에러가 아닌 멱등 성공으로 돌려주되, 돌아가기 전에
@@ -247,8 +251,11 @@ export const removeFromRound = groupActionClient
     const round = await getRound(ctx.groupId, parsedInput.roundId);
     if (!round) throw new ActionError('ROUND_NOT_FOUND');
     const result = await removeFromRoster(ctx.groupId, round.id, parsedInput.membershipId);
-    if (result === 'not_in_roster') throw new ActionError('NOT_IN_ROSTER');
-    if (result === 'paid') throw new ActionError('PAID_MEMBER');
+    if (result !== 'removed') {
+      // 화면이 낡았다는 뜻이다 — 새로 받게 한 뒤 알린다.
+      revalidatePayment(ctx.groupId, round.id);
+      throw new ActionError(result === 'paid' ? 'PAID_MEMBER' : 'NOT_IN_ROSTER');
+    }
     revalidatePayment(ctx.groupId, round.id);
     return { removed: true };
   });

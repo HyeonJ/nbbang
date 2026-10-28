@@ -232,7 +232,8 @@ describe('명단 편집 — 총무의 면제·추가 (D3)', () => {
     const [chulsoo] = g.members;
     const roundId = await newRound(g);
     session.userId = g.owner.userId;
-    await markPaid({ groupId: g.gid, roundId, membershipId: chulsoo.membershipId });
+    const paidRes = await markPaid({ groupId: g.gid, roundId, membershipId: chulsoo.membershipId });
+    expect(paidRes.serverError).toBeUndefined();
 
     const res = await removeFromRound({ groupId: g.gid, roundId, membershipId: chulsoo.membershipId });
     expect(res.serverError).toBe('PAID_MEMBER');
@@ -287,5 +288,33 @@ describe('명단 편집 — 총무의 면제·추가 (D3)', () => {
     const input = { groupId: g.gid, roundId, membershipId: chulsoo.membershipId };
     expect((await removeFromRound(input)).serverError).toBe('FORBIDDEN');
     expect((await addToRound(input)).serverError).toBe('FORBIDDEN');
+  });
+});
+
+describe('명단 편집 — 경합과 모임 경계', () => {
+  it('면제한 뒤의 납부 체크는 NOT_IN_ROSTER이고 원장이 늘지 않는다', async () => {
+    const g = await seedGroup(['철수']);
+    const [chulsoo] = g.members;
+    const roundId = await newRound(g);
+    session.userId = g.owner.userId;
+    const removed = await removeFromRound({ groupId: g.gid, roundId, membershipId: chulsoo.membershipId });
+    expect(removed.serverError).toBeUndefined();
+
+    const res = await markPaid({ groupId: g.gid, roundId, membershipId: chulsoo.membershipId });
+    expect(res.serverError).toBe('NOT_IN_ROSTER');
+    expect(await db.select().from(ledgerEntries).where(eq(ledgerEntries.groupId, g.gid))).toHaveLength(0);
+  });
+
+  it('다른 모임의 멤버십은 추가 NOT_MEMBER, 면제 NOT_IN_ROSTER — 500이 아니다', async () => {
+    const g = await seedGroup();
+    const other = await seedGroup(['타모임']);
+    const roundId = await newRound(g);
+    const foreign = other.members[0];
+
+    session.userId = g.owner.userId;
+    const input = { groupId: g.gid, roundId, membershipId: foreign.membershipId };
+    expect((await addToRound(input)).serverError).toBe('NOT_MEMBER');
+    expect((await removeFromRound(input)).serverError).toBe('NOT_IN_ROSTER');
+    expect(await rosterIds(roundId)).toEqual([g.owner.membershipId]);
   });
 });
