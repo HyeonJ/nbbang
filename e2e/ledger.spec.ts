@@ -153,6 +153,11 @@ test('지출·회비가 잔액에 정확히 반영되고 정정으로 되돌아�
   await mp.getByTestId('join-submit').click();
   await expect(mp).toHaveURL(/\/groups\/[^/]+$/);
 
+  // 회차 명단은 만들 때 고정된다(ADR-005) — 뒤늦게 합류한 철수는 총무가 넣어야 1월 회차의 미납자다.
+  await op.goto(`/groups/${groupId}/dues/${roundId}`);
+  await op.getByRole('button', { name: '철수 명단에 추가' }).click();
+  await expect(op.getByTestId('roster-addable')).toHaveCount(0);
+
   // 잔액은 원장 하나에서 나온다 — 역할이 달라도 같은 수치를 본다.
   await expect(mp.getByTestId('group-balance')).toHaveText(exactAmount('20,000'));
   await expect(mp.getByTestId('recent-entry-row')).toHaveCount(5);
@@ -166,7 +171,7 @@ test('지출·회비가 잔액에 정확히 반영되고 정정으로 되돌아�
 
   await mp.goto(`/groups/${groupId}/dues`);
   await expect(mp.getByTestId('round-row')).toHaveCount(1);
-  // 명단이 2명으로 늘었으니 납부는 1/2 — 예상 총액도 40,000으로 따라 오른다.
+  // 총무가 철수를 회차 명단에 넣었으니 납부는 1/2 — 예상 총액도 40,000이다.
   await expect(mp.getByTestId('round-paid-count')).toHaveText('1/2');
   await expect(mp.getByTestId('round-form')).toHaveCount(0);
 
