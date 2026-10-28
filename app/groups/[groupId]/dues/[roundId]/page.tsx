@@ -6,8 +6,9 @@ import {
   getGroupMembers,
   getRound,
   getRoundPaidMembershipIds,
+  getRoundRoster,
 } from '@/lib/db/queries';
-import { roundTotals, unpaidMembers } from '@/lib/domain/dues';
+import { noticeNames, rosterLabel, roundTotals, unpaidMembers } from '@/lib/domain/dues';
 import { formatAmount } from '@/lib/format';
 import { Amount } from '@/components/ui/amount';
 import { Cell, DataTable, Row } from '@/components/ui/data-table';
@@ -15,6 +16,7 @@ import { GroupTabs } from '@/components/ui/group-tabs';
 import { PageHeader } from '@/components/ui/page-header';
 import { TextLink } from '@/components/ui/text-link';
 import PaymentToggle from './payment-toggle';
+import { RosterAddButton, RosterRemoveButton } from './roster-actions';
 import UnpaidNotice from './unpaid-notice';
 
 /**
@@ -39,25 +41,25 @@ export default async function RoundPage({
   if (!round) notFound();
 
   const isOwner = found.membership.role === 'owner';
-  const [members, paidIds] = await Promise.all([
-    getGroupMembers(groupId),
+  const [roster, paidIds, members] = await Promise.all([
+    getRoundRoster(round.id),
     getRoundPaidMembershipIds(round.id),
+    getGroupMembers(groupId),
   ]);
 
+  // 수치·미납·납부는 모두 **회차 명단**에서 나온다 — 지금 명단이 아니다(ADR-005 D1).
+  // 납부는 명단 안에서만 존재하므로(dues_payments_roster_fk) 미납액이 음수가 될 수 없다.
   const paidSet = new Set(paidIds);
-  const roster = members.map((m) => ({ membershipId: m.id, displayName: m.displayName }));
   const unpaid = unpaidMembers(roster, paidIds);
   const paid = roster.filter((m) => paidSet.has(m.membershipId));
+  const { expected, collected, outstanding } = roundTotals(round.amountPerPerson, roster.length, paidIds);
 
-  const { expected, collected, outstanding } = roundTotals(
-    round.amountPerPerson,
-    members.length,
-    paidIds,
-  );
-  // 미납액이 음수면 데이터가 어긋난 것이다(납부 기록 > 현재 명단 — 납부 후 탈퇴 등).
-  // '−20,000원'은 총무에게 아무것도 알려주지 않고, 조용한 0은 불일치를 숨긴다 → 0을 쓰고 함께 알린다.
-  // roundTotals 자체는 clamp하지 않는다(도메인 주석 참조) — 표기 판단은 이 화면 몫이다.
-  const overpaid = outstanding < 0;
+  // 명단 추가 후보 — 활동 중인데 이 회차 명단에 없는 사람(월 중간 합류자 등).
+  const inRoster = new Set(roster.map((m) => m.membershipId));
+  const addable = members.filter((m) => !inRoster.has(m.id));
+
+  // 단톡방 문구에는 활동 중인 미납자만 — 나간 사람은 그 방에 없다. 나간 미납자는 화면에만 남는다.
+  const names = noticeNames(unpaid);
 
   /**
    * 미납 안내 문구 (F6 완결) — 단톡방에 그대로 붙는 두 줄이다.
@@ -71,9 +73,7 @@ export default async function RoundPage({
    */
   const accountLabel = found.group.accountLabel;
   const notice = [
-    `${round.period} 회비(${formatAmount(round.amountPerPerson)}원) 미납: ${unpaid
-      .map((m) => m.displayName)
-      .join(', ')}`,
+    `${round.period} 회비(${formatAmount(round.amountPerPerson)}원) 미납: ${names.join(', ')}`,
     ...(accountLabel ? [`계좌: ${accountLabel}`] : []),
   ].join('\n');
 
@@ -104,14 +104,9 @@ export default async function RoundPage({
             <Amount value={collected} size="md" unit />
           </Stat>
           <Stat label="미납" testId="round-total-outstanding" divider>
-            <Amount value={overpaid ? 0 : outstanding} size="md" unit tone="plain" />
+            <Amount value={outstanding} size="md" unit tone="plain" />
           </Stat>
         </div>
-        {overpaid ? (
-          <p role="alert" className="mb-5 border-l-2 border-ink pl-3 text-[13px] leading-[1.7]">
-            납부 인원이 현재 명단보다 많습니다 (기록 {paidIds.length}명 / 명단 {members.length}명)
-          </p>
-        ) : null}
       </section>
 
       <section className="pt-7">
@@ -128,16 +123,24 @@ export default async function RoundPage({
             ) : (
               unpaid.map((m) => (
                 <Row key={m.membershipId} testId="payment-row">
-                  <Cell>{m.displayName}</Cell>
+                  <Cell>{rosterLabel(m)}</Cell>
                   <Cell align="right">
                     {isOwner ? (
-                      <PaymentToggle
-                        groupId={groupId}
-                        roundId={round.id}
-                        membershipId={m.membershipId}
-                        displayName={m.displayName}
-                        paid={false}
-                      />
+                      <span className="inline-flex items-start gap-2">
+                        <RosterRemoveButton
+                          groupId={groupId}
+                          roundId={round.id}
+                          membershipId={m.membershipId}
+                          displayName={m.displayName}
+                        />
+                        <PaymentToggle
+                          groupId={groupId}
+                          roundId={round.id}
+                          membershipId={m.membershipId}
+                          displayName={m.displayName}
+                          paid={false}
+                        />
+                      </span>
                     ) : (
                       <span className="text-[12px] text-muted">미납</span>
                     )}
@@ -163,7 +166,7 @@ export default async function RoundPage({
             ) : (
               paid.map((m) => (
                 <Row key={m.membershipId} testId="payment-row">
-                  <Cell>{m.displayName}</Cell>
+                  <Cell>{rosterLabel(m)}</Cell>
                   <Cell align="right">
                     {isOwner ? (
                       <PaymentToggle
@@ -184,8 +187,36 @@ export default async function RoundPage({
         </div>
       </details>
 
+      {isOwner && addable.length > 0 ? (
+        <section className="mt-7 border-t-2 border-ink pt-4" data-testid="roster-addable">
+          <h2 className="font-display text-[11px] font-bold tracking-[0.14em] text-muted uppercase">
+            명단에 없는 멤버
+          </h2>
+          <p className="mt-2 text-[12px] leading-[1.7] text-muted">
+            회차를 만든 뒤 합류한 사람입니다. 이 회차에도 내야 하면 추가하세요.
+          </p>
+          <div className="mt-3">
+            <DataTable>
+              {addable.map((m) => (
+                <Row key={m.id} testId="roster-addable-row">
+                  <Cell>{m.displayName}</Cell>
+                  <Cell align="right">
+                    <RosterAddButton
+                      groupId={groupId}
+                      roundId={round.id}
+                      membershipId={m.id}
+                      displayName={m.displayName}
+                    />
+                  </Cell>
+                </Row>
+              ))}
+            </DataTable>
+          </div>
+        </section>
+      ) : null}
+
       {/* F6의 핵심 — 총무의 마지막 동선은 단톡방 독촉이다. 계좌가 설정돼 있으면 문구에 함께 실린다. */}
-      {unpaid.length > 0 ? (
+      {names.length > 0 ? (
         <section className="mt-7 border-2 border-ink p-4">
           <h2 className="font-display text-[11px] font-bold tracking-[0.14em] text-muted uppercase">
             미납 안내 문구

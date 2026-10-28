@@ -3,6 +3,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/lib/db';
 import {
   duesPayments,
+  duesRoundMembers,
   duesRounds,
   groups,
   ledgerEntries,
@@ -58,7 +59,7 @@ export async function getLeftMembers(groupId: string) {
     })
     .from(memberships)
     .where(and(eq(memberships.groupId, groupId), isNotNull(memberships.leftAt)))
-    .orderBy(desc(memberships.leftAt));
+    .orderBy(desc(memberships.leftAt), asc(memberships.joinedAt));
 }
 
 /**
@@ -176,6 +177,7 @@ export async function getRoundsWithCounts(groupId: string) {
       amountPerPerson: duesRounds.amountPerPerson,
       createdAt: duesRounds.createdAt,
       paidCount: count(duesPayments.id),
+      rosterCount: sql<number>`(select count(*)::int from ${duesRoundMembers} where ${duesRoundMembers.roundId} = ${duesRounds.id})`,
     })
     .from(duesRounds)
     .leftJoin(duesPayments, eq(duesPayments.roundId, duesRounds.id))
@@ -198,6 +200,26 @@ export async function getRoundPaidMembershipIds(roundId: string): Promise<string
     .from(duesPayments)
     .where(eq(duesPayments.roundId, roundId));
   return rows.map((r) => r.membershipId);
+}
+
+/**
+ * 회차 명단 — 총무 먼저, 이후 합류일 순(미납 문구 순서가 매번 같아야 한다).
+ * `left`는 **지금** 떠난 상태인지다. roundId의 모임 스코프는 호출자가 getRound로 먼저 확인한다.
+ */
+export async function getRoundRoster(roundId: string) {
+  return db
+    .select({
+      membershipId: duesRoundMembers.membershipId,
+      displayName: memberships.displayName,
+      left: sql<boolean>`${memberships.leftAt} is not null`,
+    })
+    .from(duesRoundMembers)
+    .innerJoin(memberships, eq(memberships.id, duesRoundMembers.membershipId))
+    .where(eq(duesRoundMembers.roundId, roundId))
+    .orderBy(
+      sql`case when ${memberships.role} = 'owner' then 0 else 1 end`,
+      asc(memberships.joinedAt),
+    );
 }
 
 /** 모임으로 스코프한 회차 단건 — 남의 모임 roundId는 null로 떨어진다(존재 여부도 새지 않는다). */

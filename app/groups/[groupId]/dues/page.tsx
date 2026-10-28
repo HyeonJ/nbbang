@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation';
 import { getActiveSession } from '@/lib/session';
-import { getGroupForMember, getGroupMembers, getRoundsWithCounts } from '@/lib/db/queries';
+import { getGroupForMember, getRoundsWithCounts } from '@/lib/db/queries';
 import { formatDateKst } from '@/lib/format';
 import { Amount } from '@/components/ui/amount';
 import { Cell, DataTable, Row } from '@/components/ui/data-table';
@@ -19,8 +19,7 @@ export default async function DuesPage({ params }: { params: Promise<{ groupId: 
   if (!found) notFound();
 
   const isOwner = found.membership.role === 'owner';
-  const [members, rounds] = await Promise.all([getGroupMembers(groupId), getRoundsWithCounts(groupId)]);
-  const memberCount = members.length;
+  const rounds = await getRoundsWithCounts(groupId);
 
   return (
     <main className="mx-auto max-w-3xl px-5 pb-20">
@@ -64,9 +63,9 @@ export default async function DuesPage({ params }: { params: Promise<{ groupId: 
                     <Amount value={r.amountPerPerson} size="md" />
                   </Cell>
                   <Cell align="right">
-                    {/* 납부 n/N — N은 '지금 명단'이다. 과거 회차도 현재 인원 기준으로 읽힌다(roundTotals와 같은 한계). */}
+                    {/* 납부 n/N — N은 그 회차의 명단 인원이다(ADR-005 D1). */}
                     <span className="num" data-testid="round-paid-count">
-                      {r.paidCount}/{memberCount}
+                      {r.paidCount}/{r.rosterCount}
                     </span>
                   </Cell>
                   <Cell align="right">
