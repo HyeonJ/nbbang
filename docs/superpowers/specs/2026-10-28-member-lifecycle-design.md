@@ -124,6 +124,7 @@ FK (group_id, round_id, membership_id) → dues_round_members (group_id, round_i
 
 `createGroup`의 총무 이름과 `joinByInvite`의 이름에 대해:
 - 앞뒤 공백은 잘라서 저장하고, 잘라낸 결과가 비면 거절한다.
+- 보이지 않는 문자(공백·폭 없는 문자·한글 채움 문자 등 Unicode Default_Ignorable)만으로 된 이름은 빈 이름으로 보고, 앞뒤의 그런 문자는 잘라 저장한다. 이름 안쪽 문자는 그대로 둔다(이름은 유일하지 않아도 된다).
 - `탈퇴한 멤버`(`ANONYMOUS_MEMBER_NAME`)는 거절한다. 이 이름은 파기의 표지이고, 살아 있는 사람이 쓰면 공개 장부에서 둘을 구별할 수 없다.
 
 ## 6. 동시성

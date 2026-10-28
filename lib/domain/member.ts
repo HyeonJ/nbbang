@@ -11,9 +11,10 @@ export class MemberRuleError extends Error {
  */
 export const ANONYMOUS_MEMBER_NAME = '탈퇴한 멤버';
 
-// 공백과 폭 없는 문자는 화면에 보이지 않으므로 빈 이름·예약 이름 판정에서 모두 무시한다.
-const INVISIBLE = /[\s\u200B-\u200D\uFEFF]+/g;
-const EDGE_INVISIBLE = /^[\s\u200B-\u200D\uFEFF]+|[\s\u200B-\u200D\uFEFF]+$/g;
+// 공백과 Unicode Default_Ignorable 문자(폭 없는 문자, 한글 채움 문자 U+3164 등)는 화면에 보이지 않는다.
+// 이것만으로 된 "투명 닉네임"이나 이를 끼워 넣은 예약 이름을 빈 이름·예약 이름 판정에서 모두 무시한다.
+const INVISIBLE = /[\s\p{Default_Ignorable_Code_Point}]+/gu;
+const EDGE_INVISIBLE = /^[\s\p{Default_Ignorable_Code_Point}]+|[\s\p{Default_Ignorable_Code_Point}]+$/gu;
 const squash = (s: string) => s.replace(INVISIBLE, '');
 
 export function parseDisplayName(input: string): string {
