@@ -51,6 +51,7 @@ const { getActiveSession } = await import('@/lib/session');
 const { deleteAccount } = await import('@/actions/account');
 const { DELETE_ACCOUNT_CONFIRM } = await import('@/lib/domain/account');
 const { createExpense } = await import('@/actions/ledger');
+const { restoreMember } = await import('@/actions/membership');
 
 /** 메타데이터 조회 전용 핸들 — 가드를 지난 테스트 브랜치다. 여기서는 읽기만 한다. */
 const sql = await requireTestDatabase('회원 탈퇴 통합 테스트');
@@ -336,6 +337,35 @@ describe('회원 탈퇴 — 식별자 파기', () => {
       .from(duesPayments)
       .where(and(eq(duesPayments.roundId, fx.roundId), eq(duesPayments.membershipId, fx.leaverMembershipId)));
     expect(paid, '탈퇴로 과거 납부 기록이 사라졌다 — 낸 사람이 안 낸 사람이 됐다').toHaveLength(1);
+  });
+
+  it('3b. 탈퇴하면 모든 멤버십이 withdrawn이 된다 — 이미 내보내진 것도 덮어 되살릴 수 없게 한다', async () => {
+    const fx = await seed();
+    // 두 번째 모임: 탈퇴자는 거기서 이미 내보내진 상태다.
+    const gid2 = crypto.randomUUID();
+    await db.insert(groups).values({ id: gid2, name: '둘째모임', inviteToken: newToken(), publicToken: newPublicToken() });
+    await db.insert(memberships).values({
+      id: crypto.randomUUID(), userId: fx.owner.userId, groupId: gid2, role: 'owner', displayName: '영희',
+    });
+    const removedAt = new Date('2026-03-01T00:00:00Z');
+    const removedId = crypto.randomUUID();
+    await db.insert(memberships).values({
+      id: removedId, userId: fx.leaver.userId, groupId: gid2, role: 'member', displayName: '민지',
+      leftAt: removedAt, leftReason: 'removed',
+    });
+
+    expect((await withdraw(fx.leaver))?.serverError).toBeUndefined();
+
+    const mine = await db.select().from(memberships).where(eq(memberships.userId, fx.leaver.userId));
+    expect(mine).toHaveLength(2);
+    expect(mine.every((m) => m.leftReason === 'withdrawn'), '탈퇴자의 멤버십이 withdrawn이 아니다').toBe(true);
+    expect(mine.find((m) => m.id === fx.leaverMembershipId)!.leftAt).toBeInstanceOf(Date);
+    // 이미 떠난 시각은 보존한다 — 언제 모임을 떠났는가는 탈퇴로 바뀌는 사실이 아니다.
+    expect(mine.find((m) => m.id === removedId)!.leftAt?.toISOString()).toBe(removedAt.toISOString());
+
+    // 이름이 파기된 멤버십을 총무가 되살릴 수 없다.
+    as(fx.owner);
+    expect((await restoreMember({ groupId: gid2, membershipId: removedId }))?.serverError).toBe('NOT_REMOVED');
   });
 
   it('4. 정산은 금액·인원·이체 구조가 불변이고 **탈퇴자 행의 이름만** 바뀐다 — 동명이인은 그대로', async () => {
