@@ -14,6 +14,7 @@ const ERRORS: Record<string, string> = {
 };
 
 type Props = { groupId: string; roundId: string; membershipId: string; displayName: string };
+type RemoveProps = Props & { left: boolean };
 
 /** 실패 코드 → 문구. 세션 만료는 문구 대신 로그인으로 보낸다(payment-toggle과 같은 처리). */
 function messageOf(code: string | undefined): string | null {
@@ -28,8 +29,11 @@ function useLoginRedirect(groupId: string, roundId: string) {
   };
 }
 
-/** 면제 — 이 회차의 의무에서 뺀다. 되돌리려면 명단에 다시 넣으면 된다. */
-export function RosterRemoveButton({ groupId, roundId, membershipId, displayName }: Props) {
+/**
+ * 면제 — 이 회차의 의무에서 뺀다. 활동 중인 멤버는 명단에 다시 넣으면 되돌려진다.
+ * 단, 모임을 나간 멤버는 다시 넣을 수 없다(addToRound가 NOT_MEMBER로 거절) — 확인창이 그 사실을 알린다.
+ */
+export function RosterRemoveButton({ groupId, roundId, membershipId, displayName, left }: RemoveProps) {
   const { execute, isPending, result } = useAction(removeFromRound, { onError: useLoginRedirect(groupId, roundId) });
   const message = messageOf(result.serverError);
   return (
@@ -43,7 +47,10 @@ export function RosterRemoveButton({ groupId, roundId, membershipId, displayName
         disabled={isPending}
         onClick={() => {
           if (isPending) return;
-          if (!window.confirm(`${displayName}을(를) 이 회차 명단에서 뺄까요? 예상 금액이 줄어듭니다.`)) return;
+          const confirmText = left
+            ? `${displayName}은(는) 모임을 나간 멤버라 명단에서 빼면 다시 넣을 수 없습니다. 이 회차 미납을 면제할까요?`
+            : `${displayName}을(를) 이 회차 명단에서 뺄까요? 예상 금액이 줄어듭니다.`;
+          if (!window.confirm(confirmText)) return;
           execute({ groupId, roundId, membershipId });
         }}
       >

@@ -93,7 +93,10 @@ test.describe('멤버 생명주기', () => {
     // 미납자가 나간 사람뿐이라 단톡방에 붙일 문구가 없다.
     await expect(op.getByTestId('unpaid-text')).toHaveCount(0);
 
+    // 기존 on('dialog') 핸들러가 수락하므로 여기서는 메시지만 잡는다.
+    const dialogMessage = new Promise<string>((resolve) => op.once('dialog', (d) => resolve(d.message())));
     await op.getByRole('button', { name: '철수 면제' }).click();
+    expect(await dialogMessage).toContain('다시 넣을 수 없습니다');
     await expect(op.getByTestId('round-total-expected')).toHaveText(exactAmount('20,000'));
     await expect(op.getByTestId('payment-row').filter({ hasText: '철수' })).toHaveCount(0);
   });
