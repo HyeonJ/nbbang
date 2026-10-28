@@ -12,20 +12,31 @@
 
 ## 2. 데이터 모델 (금액: 정수 원)
 
+> 2026-10-28 갱신 — 초안(2026-09-11)의 `settlement_shares`·"그리디 최소 이체"·회차 `상태`는
+> 구현 과정에서 바뀌었다. 아래가 현재 스키마이고, 정본은 `lib/db/schema.ts`다.
+
 ```
-groups            id, name, inviteToken, publicToken, createdAt
-memberships       userId × groupId, role(owner|member), displayName, joinedAt
-ledger_entries    ★불변 원장: id, groupId, type(DUES_PAYMENT|EXPENSE|REVERSAL),
-                  amount, occurredAt, category, memo, createdBy, reversalOf, createdAt
-dues_rounds       groupId, 연월, 1인 금액, 상태
-dues_payments     roundId × membershipId → ledgerEntryId (1:1)
-settlements       groupId, 제목, 총액, 일자, createdBy
-settlement_shares settlementId, from→to, amount  (분배 스냅샷)
+groups                  id, name, inviteToken, publicToken, accountLabel?, createdAt
+memberships             id, userId × groupId, role(owner|member), displayName, joinedAt
+ledger_entries          ★불변 원장: id, groupId, type(DUES_PAYMENT|EXPENSE|REVERSAL),
+                        amount(부호 있음), occurredAt, category?, memo?, createdBy,
+                        subjectMembershipId?, reversalOf?, createdAt
+dues_rounds             id, groupId, period('YYYY-MM'), amountPerPerson, createdAt
+dues_payments           groupId, roundId × membershipId → ledgerEntryId (1:1)
+settlements             id, groupId, title, total, payerMembershipId, occurredAt, createdBy
+settlement_participants settlementId × membershipId, displayNameAtTime, shareAmount, isPayer
+settlement_transfers    settlementId, from → to membershipId, amount
+rate_limits             bucket(IP HMAC), count, windowStart        — 공개 장부 레이트 리밋
+user.deleted_at         탈퇴 표시 (Better Auth 테이블에 추가한 컬럼)
 ```
 
-- `ledger_entries`는 **append-only** — UPDATE/DELETE 없음. 정정은 REVERSAL 엔트리(`reversalOf`) 후 재기록 ([ADR-001](../../adr/001-immutable-ledger.md))
+- `ledger_entries`는 **append-only** — UPDATE/DELETE 없음. 정정은 REVERSAL 엔트리(`reversalOf`)로만 ([ADR-001](../../adr/001-immutable-ledger.md)).
+  예외 둘: 모임 완전 삭제(행째 삭제)와 탈퇴 시 앱이 쓴 납부 메모의 이름 파기([ADR-004](../../adr/004-deletion-semantics.md)).
+- 정정할 수 있는 것은 **지출뿐**이다. 회비 납부는 회차 화면의 납부 취소(역분개 + `dues_payments` 삭제)로만 되돌린다.
 - 모임 잔액 = 원장 합산(파생값, 컬럼으로 저장하지 않음)
-- 정산 분배는 그리디 최소 이체 알고리즘, **분배 합계 = 총액** 불변식
+- 모임 경계는 `(group_id, id)` 복합 FK로 DB가 고정한다 — 타 모임 id를 가리키는 행은 23503
+- 정산은 원장 밖이다([ADR-003](../../adr/003-settlement-outside-ledger.md)). v1은 **선결제자 1명** 모델이라 상계가 없고
+  이체는 최대 n−1건, **부담액 합계 = 총액** 불변식, 나머지는 앞에서부터 1원씩
 
 ## 3. 레이어
 
@@ -73,3 +84,6 @@ lib/db/             Drizzle 스키마·쿼리·트랜잭션
 | 2026-09-15 | **복합 FK 하드닝** — 모임 경계를 액션 레이어만 보던 곳을 DB도 보게 바꿨다(`(group_id, id)` UNIQUE를 참조 대상으로). 타 모임 id를 직접 insert하는 경로가 `23503`으로 거부된다 — 인가가 뚫려도 돈이 모임을 넘지 못한다 |
 | 2026-09-15 | **공개 장부 누출 방어를 응답 수준에서 고정** — `force-dynamic` + `no-store`(재발급한 옛 링크가 CDN에 남지 않게), `Referrer-Policy: no-referrer` + `X-Robots-Tag`(링크가 리퍼러·검색으로 새지 않게), 서드파티 리소스 0건, 전용 쿼리(컬럼 명시 선택). 공개 토큰은 **128비트**로 상향. 레이트 리밋은 v1 미도입으로 결정·기록 |
 | 2026-09-15 | v1 완성(Plan 03 Task 11) — F1~F7 전부 배포·검증. 남은 성공 기준은 **실모임 온보딩** 하나뿐이며 코드 밖 활동이다 |
+| 2026-09-17 | **Plan 04 실사용 전 하드닝** — 공개 링크 레이트 리밋(미들웨어, IP는 HMAC만, 보관 최대 48시간) · 모임 완전 삭제(FK 전이 폐포 대조) · 회원 탈퇴 = 식별자 파기([ADR-004](../../adr/004-deletion-semantics.md)) · 개인정보처리방침 · 세션 행 IP/UA 미보관 |
+| 2026-10-27 | **P0: 탈퇴 시 앱이 쓴 납부 메모의 이름도 파기** — 파기 경계를 "자유 텍스트인가"에서 "누가 적었는가"로 개정(ADR-004 결정 2(b)). 키는 `ledger_entries.subject_membership_id`(납부 취소가 `dues_payments`를 지워도 남는다) |
+| 2026-10-28 | 전체 회고 — 정정 대상을 지출로 한정(회비 납부를 정정 경로로 되돌리면 납부 취소가 영구히 막히던 결함), CI의 test DB·배포 직렬화. **기획 공백 발견: 멤버가 모임을 떠나는 경우가 모델에 없다** → Plan 05 첫 항목([requirements §8](../../requirements.md)) |
